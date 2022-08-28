@@ -453,6 +453,20 @@ library SafeMath {
     }
 }
 
+interface IDigits {
+    function claim() external;
+
+    function withdrawableDividendOf(address account)
+        external
+        view
+        returns (uint256);
+
+    function withdrawnDividendOf(address account)
+        external
+        view
+        returns (uint256);
+}
+
 contract MultiRewards is ReentrancyGuard, Pausable {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
@@ -468,6 +482,9 @@ contract MultiRewards is ReentrancyGuard, Pausable {
         uint256 rewardPerTokenStored;
     }
     IERC20 public stakingToken;
+    IERC20 public reflectionToken;
+    IDigits private _digits;
+
     mapping(address => Reward) public rewardData;
     address[] public rewardTokens;
 
@@ -476,13 +493,22 @@ contract MultiRewards is ReentrancyGuard, Pausable {
         public userRewardPerTokenPaid;
     mapping(address => mapping(address => uint256)) public rewards;
 
+    uint256 private _reflectionPerToken;
+    mapping(address => uint256) private _userReflectionPerTokenPaid;
+
     uint256 private _totalSupply;
     mapping(address => uint256) private _balances;
 
     /* ========== CONSTRUCTOR ========== */
 
-    constructor(address _owner, address _stakingToken) public Owned(_owner) {
+    constructor(
+        address _owner,
+        address _stakingToken,
+        address _reflectionToken
+    ) public Owned(_owner) {
         stakingToken = IERC20(_stakingToken);
+        reflectionToken = IERC20(_reflectionToken);
+        _digits = IDigits(_stakingToken);
     }
 
     function addReward(
@@ -623,6 +649,10 @@ contract MultiRewards is ReentrancyGuard, Pausable {
         updateReward(address(0))
     {
         require(rewardData[_rewardsToken].rewardsDistributor == msg.sender);
+        // Reccomendation from Peckshield's audit of similar contract, they state
+        // that too large reward can cause overflow in 'RewardPerToken()' function.
+        // https://app.topshelf.finance/PeckShield-Audit-Report-Topshelf-v1.0.pdf
+        require(reward < uint256(-1).div(1e32), "Reward too large, would lock");
         // handle the transfer of reward tokens via `transferFrom` to reduce the number
         // of transactions required and ensure correctness of the reward amount
         IERC20(_rewardsToken).safeTransferFrom(
@@ -700,7 +730,34 @@ contract MultiRewards is ReentrancyGuard, Pausable {
                     .rewardPerTokenStored;
             }
         }
+        if (account != address(0) && _totalSupply > 0) {
+            // We trust Digits impelmentation here, that 'withdrawableDividendOf()'
+            // return value is equal to claimed amount of dai using 'claim()'
+            uint256 reflection = _digits.withdrawableDividendOf(address(this));
+            if (reflection > 0) {
+                _digits.claim();
+                _reflectionPerToken = reflection
+                    .mul(1e18)
+                    .div(_totalSupply)
+                    .add(_reflectionPerToken);
+            }
+            // Process reflection reward on each stake(), withdraw() and getReward()
+            _processReflectionReward(account);
+        }
         _;
+    }
+
+    /* ========== PRIVATE ========== */
+
+    function _processReflectionReward(address account) private {
+        uint256 reward = _balances[account]
+            .mul(_reflectionPerToken.sub(_userReflectionPerTokenPaid[account]))
+            .div(1e18);
+        _userReflectionPerTokenPaid[account] = _reflectionPerToken;
+        if (reward > 0) {
+            reflectionToken.safeTransfer(account, reward);
+            emit ReflectionPaid(account, reward);
+        }
     }
 
     /* ========== EVENTS ========== */
@@ -713,6 +770,7 @@ contract MultiRewards is ReentrancyGuard, Pausable {
         address indexed rewardsToken,
         uint256 reward
     );
+    event ReflectionPaid(address indexed user, uint256 reward);
     event RewardsDurationUpdated(address token, uint256 newDuration);
     event Recovered(address token, uint256 amount);
 }
