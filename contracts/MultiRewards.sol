@@ -730,7 +730,9 @@ contract MultiRewards is ReentrancyGuard, Pausable {
                     .rewardPerTokenStored;
             }
         }
-        if (account != address(0) && _totalSupply > 0) {
+        // In case something is wrong with claiming process, pausing will enable
+        // withdrawals without reflection rewards
+        if (account != address(0) && _totalSupply > 0 && !paused) {
             // We trust Digits impelmentation here, that 'withdrawableDividendOf()'
             // return value is equal to claimed amount of dai using 'claim()'
             uint256 reflection = _digits.withdrawableDividendOf(address(this));

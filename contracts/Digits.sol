@@ -457,8 +457,7 @@ interface IUniswapV2Router02 is IUniswapV2Router01 {
 pragma solidity ^0.8.10;
 
 contract DividendTracker is Ownable, IERC20 {
-    address public constant dai =
-        address(0xd586E7F844cEa2F87f50152665BCbc2C279D8d70); // DAI.e address
+    address public immutable dai;
 
     string private constant _name = "Digits_DividendTracker";
     string private constant _symbol = "Digits_DividendTracker";
@@ -493,7 +492,12 @@ contract DividendTracker is Ownable, IERC20 {
         uint256 lastClaimTime;
     }
 
-    constructor(address _tokenAddress, address _uniswapRouter) {
+    constructor(
+        address _dai,
+        address _tokenAddress,
+        address _uniswapRouter
+    ) {
+        dai = _dai;
         minTokenBalanceForDividends = 10000 * (10**18);
         tokenAddress = _tokenAddress;
         uniswapV2Router = IUniswapV2Router02(_uniswapRouter);
@@ -816,10 +820,8 @@ contract Digits is Ownable, IERC20 {
     string private constant _name = "Digits";
     string private constant _symbol = "DIGITS";
 
-    address public constant uniswapRouter =
-        address(0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506); // sushi router
-    address public constant dai =
-        address(0xd586E7F844cEa2F87f50152665BCbc2C279D8d70); // DAI.e address
+    address public immutable uniswapRouter;
+    address public immutable dai;
 
     uint256 public treasuryFeeBPS = 700;
     uint256 public liquidityFeeBPS = 200;
@@ -885,17 +887,29 @@ contract Digits is Ownable, IERC20 {
     mapping(address => bool) private _isExcludedFromMaxTx;
     mapping(address => bool) private _isExcludedFromMaxWallet;
 
-    constructor(address _marketingWallet, address[] memory whitelistAddress) {
+    constructor(
+        address _dai,
+        address _uniswapRouter,
+        address _marketingWallet,
+        address[] memory whitelistAddress
+    ) {
         marketingWallet = _marketingWallet;
         includeToWhiteList(whitelistAddress);
+        dai = _dai;
+        uniswapRouter = _uniswapRouter;
 
         uniswapV2Router = IUniswapV2Router02(uniswapRouter);
+        uniswapV2Pair = address(0);
         uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory()).createPair(
                 address(this),
                 dai
             );
 
-        dividendTracker = new DividendTracker(address(this), uniswapRouter);
+        dividendTracker = new DividendTracker(
+            dai,
+            address(this),
+            uniswapRouter
+        );
 
         _setAutomatedMarketMakerPair(uniswapV2Pair, true);
 

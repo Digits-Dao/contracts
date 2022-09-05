@@ -2,6 +2,9 @@ import { task } from "hardhat/config";
 import "@nomiclabs/hardhat-waffle";
 import '@typechain/hardhat';
 import '@nomiclabs/hardhat-ethers';
+import "hardhat-etherscan-abi";
+import * as dotenv from 'dotenv'
+dotenv.config()
 
 // This is a sample Hardhat task. To learn how to create your own go to
 // https://hardhat.org/guides/create-task.html
@@ -23,7 +26,14 @@ module.exports = {
   networks: {
     hardhat: {
       allowUnlimitedContractSize: true,
+      forking: {
+        url: `https://eth-mainnet.g.alchemy.com/v2/${process.env.MAINNET_ALCHEMY_KEY}`,
+        blockNumber: 15476666
+      }
     },
+  },
+  etherscan: {
+    apiKey: process.env.MAINNET_ETHERSCAN_KEY
   },
   solidity: {
     compilers: [
