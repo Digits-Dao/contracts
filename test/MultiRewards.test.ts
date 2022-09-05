@@ -1,5 +1,5 @@
 import { ethers, network } from "hardhat";
-import { MultiRewards, Digits, IERC20 } from "../typechain-types";
+import { MultiRewards, Digits, IERC20, TokenStorage } from "../typechain-types";
 import { expect } from "chai";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { getBigNumber } from "../utils";
@@ -7,6 +7,7 @@ import { constants } from "ethers";
 
 describe("MultiRewards", function () {
     let MultiRewards: MultiRewards;
+    let TokenStorage: TokenStorage;
     let deployer: SignerWithAddress;
     let alice: SignerWithAddress;
     let bob: SignerWithAddress;
@@ -29,9 +30,16 @@ describe("MultiRewards", function () {
         const daiWhale = await ethers.getImpersonatedSigner(DAI_WHALE);
         await Dai.connect(daiWhale).transfer(deployer.address, tokenAmount)
 
-        // deploy digits
+        // deploy Digits
         const digitsFactory = await ethers.getContractFactory("Digits");
         Digits = (await digitsFactory.deploy(Dai.address, SUSHI_ROUTER, deployer.address, [deployer.address])) as Digits;
+
+        // deploy TokenStorage
+        const tokenStorageFactory = await ethers.getContractFactory("TokenStorage");
+        const dividendTracker = await Digits.dividendTracker();
+        TokenStorage = (await tokenStorageFactory.deploy(Dai.address, Digits.address, deployer.address, dividendTracker, SUSHI_ROUTER)) as TokenStorage;
+        await TokenStorage.addManager(Digits.address);
+        await Digits.setTokenStorage(TokenStorage.address);
 
         // deploy MultiRewards
         const contractFactory = await ethers.getContractFactory("MultiRewards");
@@ -44,7 +52,9 @@ describe("MultiRewards", function () {
         await Digits.excludeFromMaxWallet(MultiRewards.address, true);
         await Digits.setSwapEnabled(false);
         await Digits.transfer(alice.address, tokenAmount);
+        await Digits.transfer(bob.address, tokenAmount);
         await Digits.connect(alice).approve(MultiRewards.address, constants.MaxUint256);
+        await Digits.connect(bob).approve(MultiRewards.address, constants.MaxUint256);
         await Dai.approve(MultiRewards.address, constants.MaxUint256);
 
         snapshotId = await ethers.provider.send("evm_snapshot", []);
@@ -73,10 +83,15 @@ describe("MultiRewards", function () {
             await expect(action).to.be.revertedWith('Only the contract owner may perform this action');
         });
 
-        it("should not add reward if duration is not zero", async function () {
+        it("should not add reward if current duration is not zero", async function () {
             await MultiRewards.addReward(Dai.address, deployer.address, rewardsDuration);
             const action = MultiRewards.addReward(Dai.address, deployer.address, 10_000);
             await expect(action).to.be.reverted;
+        });
+
+        it("should not add reward if new duration is zero", async function () {
+            const action = MultiRewards.addReward(Dai.address, deployer.address, 0);
+            await expect(action).to.be.revertedWith('Reward duration must be non-zero');
         });
     });
 
@@ -85,9 +100,26 @@ describe("MultiRewards", function () {
             await MultiRewards.addReward(Dai.address, deployer.address, rewardsDuration);
         });
 
-        it("should return zero just after addeing reward", async () => {
+        it("should return zero just after adding reward", async () => {
             const lastTimeRewardApplicable = await MultiRewards.lastTimeRewardApplicable(Dai.address);
             expect(lastTimeRewardApplicable).to.be.equal(0);
+        });
+
+        it("should return block.timestamp if reward period is in the future", async () => {
+            await MultiRewards.notifyRewardAmount(Dai.address, tokenAmount);
+            await network.provider.send("hardhat_mine", ['0x' + Number(1).toString(16), '0x' + Number(3600).toString(16)]);
+            const lastTimeRewardApplicable = await MultiRewards.lastTimeRewardApplicable(Dai.address);
+            const currentBlock = await ethers.provider.getBlockNumber();
+            const blockTime = (await ethers.provider.getBlock(currentBlock)).timestamp;
+            expect(lastTimeRewardApplicable).to.be.equal(blockTime);
+        });
+
+        it("should return reward period if reward period is in the past", async () => {
+            await MultiRewards.notifyRewardAmount(Dai.address, tokenAmount);
+            await network.provider.send("hardhat_mine", ['0x' + Number(169).toString(16), '0x' + Number(3600).toString(16)]);
+            const rewardData = await MultiRewards.rewardData(Dai.address);
+            const lastTimeRewardApplicable = await MultiRewards.lastTimeRewardApplicable(Dai.address);
+            expect(lastTimeRewardApplicable).to.be.equal(rewardData["periodFinish"]);
         });
     });
 
@@ -104,7 +136,7 @@ describe("MultiRewards", function () {
         });
     });
 
-    describe("notifyReward", () => {
+    describe("notifyRewardAmount", () => {
         beforeEach("added token", async () => {
             await MultiRewards.addReward(Dai.address, deployer.address, rewardsDuration);
         });
@@ -129,6 +161,10 @@ describe("MultiRewards", function () {
         it("should execute only by the token distributor", async function () {
             const action = MultiRewards.connect(alice).notifyRewardAmount(Dai.address, tokenAmount);
             await expect(action).to.be.reverted;
+        });
+
+        it("should not update reflection", async function () {
+
         });
     });
 
@@ -420,7 +456,7 @@ describe("MultiRewards", function () {
             const rewardPerToken = await MultiRewards.rewardPerToken(Dai.address);
             expect(rewardPerToken).to.be.equal(rewardPerTokenStored);
         });
-        // Add test with blokc in the future
+        // Add test with block in the future
     });
 
     describe("getRewardForDuration", () => {
