@@ -1,5 +1,5 @@
 import { ethers, network } from "hardhat";
-import { MultiRewards, Digits, IERC20, TokenStorage } from "../typechain-types";
+import { MultiRewards, Digits, IERC20, TokenStorage, IUniswapV2Router02 } from "../typechain-types";
 import { expect } from "chai";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { getBigNumber } from "../utils";
@@ -7,6 +7,7 @@ import { constants } from "ethers";
 
 describe("MultiRewards", function () {
     let MultiRewards: MultiRewards;
+    let SushiRouter: IUniswapV2Router02;
     let TokenStorage: TokenStorage;
     let deployer: SignerWithAddress;
     let alice: SignerWithAddress;
@@ -15,6 +16,8 @@ describe("MultiRewards", function () {
     let snapshotId: string;
     let Dai: IERC20;
     const tokenAmount = getBigNumber(10_000);
+    const initialUserAmount = getBigNumber(50_000);
+    const initialDeployerAmount = getBigNumber(1_000_000);
     const rewardsDuration = 86400 * 7;
     const DAI = "0x6B175474E89094C44Da98b954EedeAC495271d0F"
     const SUSHI_ROUTER = "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"
@@ -26,18 +29,21 @@ describe("MultiRewards", function () {
         Dai = await ethers.getContractAt(
             "@openzeppelin/contracts/token/ERC20/IERC20.sol:IERC20", DAI) as IERC20;
 
+        SushiRouter = await ethers.getContractAt("IUniswapV2Router02", SUSHI_ROUTER) as IUniswapV2Router02;
+
         // send dai to deployer
         const daiWhale = await ethers.getImpersonatedSigner(DAI_WHALE);
-        await Dai.connect(daiWhale).transfer(deployer.address, tokenAmount)
+        await Dai.connect(daiWhale).transfer(deployer.address, initialDeployerAmount)
+        await Dai.connect(daiWhale).transfer(deployer.address, initialDeployerAmount)
 
         // deploy Digits
         const digitsFactory = await ethers.getContractFactory("Digits");
-        Digits = (await digitsFactory.deploy(Dai.address, SUSHI_ROUTER, deployer.address, [deployer.address])) as Digits;
+        Digits = (await digitsFactory.deploy(Dai.address, SushiRouter.address, deployer.address, [deployer.address])) as Digits;
 
         // deploy TokenStorage
         const tokenStorageFactory = await ethers.getContractFactory("TokenStorage");
         const dividendTracker = await Digits.dividendTracker();
-        TokenStorage = (await tokenStorageFactory.deploy(Dai.address, Digits.address, deployer.address, dividendTracker, SUSHI_ROUTER)) as TokenStorage;
+        TokenStorage = (await tokenStorageFactory.deploy(Dai.address, Digits.address, deployer.address, dividendTracker, SushiRouter.address)) as TokenStorage;
         await TokenStorage.addManager(Digits.address);
         await Digits.setTokenStorage(TokenStorage.address);
 
@@ -50,12 +56,29 @@ describe("MultiRewards", function () {
         await Digits.excludeFromFees(MultiRewards.address, true);
         await Digits.excludeFromMaxTx(MultiRewards.address, true);
         await Digits.excludeFromMaxWallet(MultiRewards.address, true);
-        await Digits.setSwapEnabled(false);
-        await Digits.transfer(alice.address, tokenAmount);
-        await Digits.transfer(bob.address, tokenAmount);
+        await Digits.transfer(alice.address, initialUserAmount);
+        await Digits.transfer(bob.address, initialUserAmount);
         await Digits.connect(alice).approve(MultiRewards.address, constants.MaxUint256);
         await Digits.connect(bob).approve(MultiRewards.address, constants.MaxUint256);
+        await Digits.connect(bob).approve(SushiRouter.address, constants.MaxUint256);
         await Dai.approve(MultiRewards.address, constants.MaxUint256);
+        await Digits.updateDividendSettings(true, getBigNumber(1_000), true);
+
+        // add liquidity for DIGITS-DAI pair
+        const currentBlock = await ethers.provider.getBlockNumber();
+        const blockTime = (await ethers.provider.getBlock(currentBlock)).timestamp;
+        await Digits.approve(SushiRouter.address, constants.MaxUint256);
+        await Dai.approve(SushiRouter.address, constants.MaxUint256);
+        await SushiRouter.addLiquidity(
+            Digits.address,
+            Dai.address,
+            getBigNumber(1_000_000),
+            getBigNumber(1_000_000),
+            0,
+            0,
+            deployer.address,
+            blockTime + 10000
+        )
 
         snapshotId = await ethers.provider.send("evm_snapshot", []);
     });
@@ -145,11 +168,12 @@ describe("MultiRewards", function () {
             const beforeOwnerBalance = await Dai.balanceOf(deployer.address);
             await MultiRewards.notifyRewardAmount(Dai.address, tokenAmount);
             const afterOwnerBalance = await Dai.balanceOf(deployer.address);
-            const { rewardsDuration, periodFinish, rewardRate, lastUpdateTime, rewardPerTokenStored } = await MultiRewards.rewardData(Dai.address);
+            const { rewardsDuration, periodFinish, rewardRate, lastUpdateTime, rewardPerTokenStored }
+                = await MultiRewards.rewardData(Dai.address);
             const currentBlock = await ethers.provider.getBlockNumber();
             const blockTime = (await ethers.provider.getBlock(currentBlock)).timestamp;
 
-            expect(beforeOwnerBalance).to.be.equal(tokenAmount);
+            expect(beforeOwnerBalance).to.be.equal(initialDeployerAmount);
             expect(afterOwnerBalance).to.be.equal(beforeOwnerBalance.sub(tokenAmount));
             expect(afterOwnerBalance).not.be.equal(beforeOwnerBalance);
             expect(rewardPerTokenStored).to.be.equal(0);
@@ -164,11 +188,31 @@ describe("MultiRewards", function () {
         });
 
         it("should not update reflection", async function () {
-
+            await MultiRewards.connect(alice).stake(tokenAmount);
+            // make few trades
+            for (let index = 0; index < 2; index++) {
+                const currentBlock = await ethers.provider.getBlockNumber();
+                const blockTime = (await ethers.provider.getBlock(currentBlock)).timestamp;
+                await SushiRouter.connect(bob).swapExactTokensForTokensSupportingFeeOnTransferTokens(
+                    getBigNumber(10_000),
+                    0,
+                    [Digits.address, Dai.address],
+                    bob.address,
+                    blockTime + 1
+                )
+            }
+            const beforeWithdrawableReflection = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const beforeDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            await MultiRewards.notifyRewardAmount(Dai.address, tokenAmount);
+            const afterWithdrawableReflection = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const afterDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            expect(beforeWithdrawableReflection).to.be.equal(afterWithdrawableReflection);
+            expect(beforeDaiBalance).to.be.equal(afterDaiBalance.sub(tokenAmount));
+            expect(beforeWithdrawableReflection.gt(getBigNumber(0)));
         });
     });
 
-    describe("setRewardDuration", () => {
+    describe("setRewardsDuration", () => { /* TODO: implement */
         // beforeEach("added token", async () => {
         //     await MultiRewards.addReward(Dai.address, deployer.address, rewardsDuration);
         // });
@@ -198,7 +242,7 @@ describe("MultiRewards", function () {
         // TODO: implement
     });
 
-    describe("setRewardDistributor", () => { /* TODO: implement */ });
+    describe("setRewardsDistributor", () => { /* TODO: implement */ });
 
     describe("recoverERC20", () => {
         it("should emit Recovered", async () => {
@@ -215,8 +259,8 @@ describe("MultiRewards", function () {
             const afterOwnerBalance = await Dai.balanceOf(deployer.address);
             const afterMultiRewardsBalance = await Dai.balanceOf(MultiRewards.address);
 
-            expect(beforeOwnerBalance).to.be.equal(0);
-            expect(afterOwnerBalance).to.be.equal(tokenAmount);
+            expect(beforeOwnerBalance).to.be.equal(initialDeployerAmount.sub(tokenAmount));
+            expect(afterOwnerBalance).to.be.equal(initialDeployerAmount);
             expect(afterOwnerBalance).not.be.equal(beforeOwnerBalance);
             expect(beforeMultiRewardsBalance).to.be.equal(tokenAmount);
             expect(afterMultiRewardsBalance).to.be.equal(0);
@@ -232,8 +276,8 @@ describe("MultiRewards", function () {
             const afterOwnerBalance = await Dai.balanceOf(deployer.address);
             const afterMultiRewardsBalance = await Dai.balanceOf(MultiRewards.address);
 
-            expect(beforeOwnerBalance).to.be.equal(0);
-            expect(afterOwnerBalance).to.be.equal(tokenAmount);
+            expect(beforeOwnerBalance).to.be.equal(initialDeployerAmount.sub(tokenAmount));
+            expect(afterOwnerBalance).to.be.equal(initialDeployerAmount);
             expect(afterOwnerBalance).not.be.equal(beforeOwnerBalance);
             expect(beforeMultiRewardsBalance).to.be.equal(tokenAmount);
             expect(afterMultiRewardsBalance).to.be.equal(0);
@@ -285,7 +329,7 @@ describe("MultiRewards", function () {
             expect(afterTotalSupply).to.be.equal(beforeTotalSupply.add(tokenAmount));
             expect(afterTotalSupply).not.be.equal(beforeTotalSupply);
 
-            expect(beforeAliceStakingTokenBalance).to.be.equal(tokenAmount);
+            expect(beforeAliceStakingTokenBalance).to.be.equal(initialUserAmount);
             expect(afterAliceStakingTokenBalance).to.be.equal(beforeAliceStakingTokenBalance.sub(tokenAmount));
             expect(afterAliceStakingTokenBalance).not.be.equal(beforeAliceStakingTokenBalance);
 
@@ -335,8 +379,8 @@ describe("MultiRewards", function () {
             expect(afterTotalSupply).to.be.equal(0);
             expect(afterTotalSupply).not.be.equal(beforeTotalSupply);
 
-            expect(beforeStakingTokenBalance).to.be.equal(0);
-            expect(afterStakingTokenBalance).to.be.equal(tokenAmount);
+            expect(beforeStakingTokenBalance).to.be.equal(initialUserAmount.sub(tokenAmount));
+            expect(afterStakingTokenBalance).to.be.equal(initialUserAmount);
             expect(afterStakingTokenBalance).not.be.equal(beforeStakingTokenBalance);
 
             expect(beforeBalance).to.be.equal(tokenAmount);
@@ -391,8 +435,8 @@ describe("MultiRewards", function () {
             expect(afterTotalSupply).to.be.equal(0);
             expect(afterTotalSupply).not.be.equal(beforeTotalSupply);
 
-            expect(beforeStakingTokenBalance).to.be.equal(0);
-            expect(afterStakingTokenBalance).to.be.equal(tokenAmount);
+            expect(beforeStakingTokenBalance).to.be.equal(initialUserAmount.sub(tokenAmount));
+            expect(afterStakingTokenBalance).to.be.equal(initialUserAmount);
             expect(afterStakingTokenBalance).not.be.equal(beforeStakingTokenBalance);
 
             expect(beforeBalance).to.be.equal(tokenAmount);
