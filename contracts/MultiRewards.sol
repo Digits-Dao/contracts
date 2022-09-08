@@ -731,19 +731,8 @@ contract MultiRewards is ReentrancyGuard, Pausable {
             }
         }
         // In case something is wrong with claiming process, pausing will enable
-        // withdrawals without reflection rewards
+        // withdrawals without processing any reflection logic
         if (account != address(0) && _totalSupply > 0 && !paused) {
-            // We trust Digits impelmentation here, that 'withdrawableDividendOf()'
-            // return value is equal to claimed amount of dai using 'claim()'
-            uint256 reflection = _digits.withdrawableDividendOf(address(this));
-            if (reflection > 0) {
-                _digits.claim();
-                _reflectionPerToken = reflection
-                    .mul(1e18)
-                    .div(_totalSupply)
-                    .add(_reflectionPerToken);
-            }
-            // Process reflection reward on each stake(), withdraw() and getReward()
             _processReflectionReward(account);
         }
         _;
@@ -752,6 +741,17 @@ contract MultiRewards is ReentrancyGuard, Pausable {
     /* ========== PRIVATE ========== */
 
     function _processReflectionReward(address account) private {
+        // This dummy transfer triggers dividend distribution
+        stakingToken.transfer(address(stakingToken), 0);
+        // We trust Digits implementation that `withdrawableDividendOf()`
+        // is equal to amount of dai got from `claim()`
+        uint256 reflection = _digits.withdrawableDividendOf(address(this));
+        if (reflection > 0) {
+            _digits.claim();
+            _reflectionPerToken = reflection.mul(1e18).div(_totalSupply).add(
+                _reflectionPerToken
+            );
+        }
         uint256 reward = _balances[account]
             .mul(_reflectionPerToken.sub(_userReflectionPerTokenPaid[account]))
             .div(1e18);
