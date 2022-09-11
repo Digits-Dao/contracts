@@ -580,6 +580,17 @@ contract MultiRewards is ReentrancyGuard, Pausable {
                 .add(rewards[account][_rewardsToken]);
     }
 
+    function dividendsEarned(address account) public view returns (uint256) {
+        return
+            _balances[account]
+                .mul(
+                    _reflectionPerToken.sub(
+                        _userReflectionPerTokenPaid[account]
+                    )
+                )
+                .div(1e32);
+    }
+
     function getRewardForDuration(address _rewardsToken)
         external
         view
@@ -740,6 +751,9 @@ contract MultiRewards is ReentrancyGuard, Pausable {
 
     /* ========== PRIVATE ========== */
 
+    /**
+     * Process reflection rewards before each `stake()`, `withdraw()`, `getReward()`.
+     */
     function _processReflectionReward(address account) private {
         // This dummy transfer triggers dividend distribution
         stakingToken.transfer(address(stakingToken), 0);
@@ -748,13 +762,11 @@ contract MultiRewards is ReentrancyGuard, Pausable {
         uint256 reflection = _digits.withdrawableDividendOf(address(this));
         if (reflection > 0) {
             _digits.claim();
-            _reflectionPerToken = reflection.mul(1e18).div(_totalSupply).add(
+            _reflectionPerToken = reflection.mul(1e32).div(_totalSupply).add(
                 _reflectionPerToken
             );
         }
-        uint256 reward = _balances[account]
-            .mul(_reflectionPerToken.sub(_userReflectionPerTokenPaid[account]))
-            .div(1e18);
+        uint256 reward = dividendsEarned(account);
         _userReflectionPerTokenPaid[account] = _reflectionPerToken;
         if (reward > 0) {
             reflectionToken.safeTransfer(account, reward);

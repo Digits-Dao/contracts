@@ -9,3 +9,4 @@ soljson-v0.7.5+commit.eb77ed08.js
 cache
 artifacts
 typechain-types
+.DS_Store

@@ -22,7 +22,8 @@ describe("MultiRewards", function () {
     const DAI = "0x6B175474E89094C44Da98b954EedeAC495271d0F"
     const SUSHI_ROUTER = "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"
     const DAI_WHALE = "0xF977814e90dA44bFA03b6295A0616a897441aceC"
-    const PRECISION = getBigNumber(1, 8);
+    const PRECISION = getBigNumber(1, 5);
+    const EXPECTED_WITHDRAWABLE_AMOUNT = getBigNumber("32621448591520465892", 0);
 
     before(async () => {
         [deployer, alice, bob] = await ethers.getSigners();
@@ -84,7 +85,7 @@ describe("MultiRewards", function () {
         snapshotId = await ethers.provider.send("evm_snapshot", []);
     });
 
-    async function makeFewTrades(tradesCount = 2, tradeValue = 10_000) {
+    async function makeFewTrades(tradesCount = 2, tradeValue = 100_000) {
         for (let index = 0; index < tradesCount; index++) {
             const currentBlock = await ethers.provider.getBlockNumber();
             const blockTime = (await ethers.provider.getBlock(currentBlock)).timestamp;
@@ -216,37 +217,54 @@ describe("MultiRewards", function () {
         });
     });
 
-    describe("setRewardsDuration", () => { /* TODO: implement */
-        // beforeEach("added token", async () => {
-        //     await MultiRewards.addReward(Dai.address, deployer.address, rewardsDuration);
-        // });
+    describe("setRewardsDuration", () => {
+        beforeEach("added token", async () => {
+            await MultiRewards.addReward(Dai.address, deployer.address, rewardsDuration);
+        });
 
-        // it("should update rewardRate", async () => {
-        //     await MultiRewards.setRewardRate(Dai.address, 10);
+        it("should update rewardDuration", async () => {
+            await MultiRewards.setRewardsDuration(Dai.address, 10);
 
-        //     const { rewardRate, lastUpdateTime, rewardPerTokenStored } = await MultiRewards.rewardData(Dai.address);
-        //     const currentBlock = await ethers.provider.getBlockNumber();
-        //     const blockTime = (await ethers.provider.getBlock(currentBlock)).timestamp;
+            const { rewardsDuration, lastUpdateTime, rewardPerTokenStored } = await MultiRewards.rewardData(Dai.address);
+            const currentBlock = await ethers.provider.getBlockNumber();
+            const blockTime = (await ethers.provider.getBlock(currentBlock)).timestamp;
 
-        //     expect(rewardPerTokenStored).to.be.equal(0);
-        //     expect(lastUpdateTime).to.be.equal(blockTime);
-        //     expect(rewardRate).to.be.equal(10);
-        // });
+            expect(rewardPerTokenStored).to.be.equal(0);
+            expect(lastUpdateTime).to.be.equal(0);
+            expect(rewardsDuration).to.be.equal(10);
+        });
 
-        // it("should emit RateChanged event", async () => {
-        //     const action = MultiRewards.setRewardRate(Dai.address, 10);
-        //     await expect(action).to.emit(MultiRewards, 'RateChanged').withArgs(Dai.address, 0, 10);
-        // });
+        it("should execute only by the token distributor", async function () {
+            const action = MultiRewards.connect(alice).setRewardsDuration(Dai.address, 10);
+            await expect(action).to.be.reverted;
+        });
 
-        // it("should execute only by the owner", async function () {
-        //     const action = MultiRewards.connect(alice).setRewardRate(Dai.address, 10);
-        //     await expect(action).to.revertedWith('Ownable: caller is not the owner');
-        // });
+        it("should emit RateChanged event", async () => {
+            const action = MultiRewards.setRewardsDuration(Dai.address, 10);
+            await expect(action).to.emit(MultiRewards, 'RewardsDurationUpdated').withArgs(Dai.address, 10);
+        });
 
-        // TODO: implement
+        it("should not update if duration is still active", async function () {
+            await MultiRewards.notifyRewardAmount(Dai.address, tokenAmount);
+            const action = MultiRewards.setRewardsDuration(Dai.address, 10);
+            await expect(action).to.revertedWith('Reward period still active');
+        });
     });
 
-    describe("setRewardsDistributor", () => { /* TODO: implement */ });
+    describe("setRewardsDistributor", () => {
+        beforeEach("added rewards", async () => {
+            await MultiRewards.addReward(Dai.address, deployer.address, rewardsDuration);
+            await MultiRewards.notifyRewardAmount(Dai.address, tokenAmount);
+        });
+
+        it("should set proper values", async () => {
+            const beforeRewardsDistributor = (await MultiRewards.rewardData(Dai.address))["rewardsDistributor"];
+            await MultiRewards.setRewardsDistributor(Dai.address, bob.address);
+            const afterRewardsDistributor = (await MultiRewards.rewardData(Dai.address))["rewardsDistributor"];
+            expect(beforeRewardsDistributor).to.equal(deployer.address);
+            expect(afterRewardsDistributor).to.equal(bob.address);
+        });
+    });
 
     describe("recoverERC20", () => {
         it("should emit Recovered", async () => {
@@ -309,7 +327,6 @@ describe("MultiRewards", function () {
     });
 
     describe("stake", () => {
-        // TODO: multiuser tests
         it("should emit Staked", async () => {
             const action = MultiRewards.connect(alice).stake(tokenAmount);
             await expect(action).to.emit(MultiRewards, "Staked").withArgs(alice.address, tokenAmount);
@@ -320,7 +337,7 @@ describe("MultiRewards", function () {
             await expect(action).to.revertedWith('Cannot stake 0');
         });
 
-        it("should stake", async () => {
+        it("should stake properly", async () => {
             const beforeTotalSupply = await MultiRewards.totalSupply();
             const beforeAliceStakingTokenBalance = await Digits.balanceOf(alice.address);
             const beforeContractBalance = await Digits.balanceOf(MultiRewards.address);
@@ -365,9 +382,9 @@ describe("MultiRewards", function () {
             await MultiRewards.notifyRewardAmount(Dai.address, tokenAmount);
         });
 
-        it("should claim proper value on subsequent stake", async () => {
+        it("should claim proper value on stake", async () => {
             await MultiRewards.connect(alice).stake(tokenAmount);
-            await makeFewTrades(1, 100_000);
+            await makeFewTrades(1);
             // trigger dividend distribution
             await Digits.connect(bob).transfer(Digits.address, 0);
 
@@ -380,21 +397,21 @@ describe("MultiRewards", function () {
             const afterWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
             const afterContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
             const afterUserDaiBalance = await Dai.balanceOf(alice.address);
-            const expectedWithdrawableAmount = getBigNumber("32621448591520465892", 0);
+
+            const expectedWithdrawableAmount = EXPECTED_WITHDRAWABLE_AMOUNT
 
             expect(beforeWithdrawable).to.equal(expectedWithdrawableAmount);
             expect(beforeUserDaiBalance).to.equal(0);
             expect(beforeContractDaiBalance).to.equal(tokenAmount);
 
             expect(afterWithdrawable).to.equal(0);
-            expect(afterUserDaiBalance).to.equal(expectedWithdrawableAmount.div(10000).mul(10000));
-            expect(afterContractDaiBalance).to.equal(tokenAmount.add(getBigNumber("5892", 0)));
-            expect(afterContractDaiBalance.sub(beforeContractDaiBalance)).lt(PRECISION);
+            expect(afterUserDaiBalance).to.equal(expectedWithdrawableAmount);
+            expect(afterContractDaiBalance).to.equal(tokenAmount);
         });
 
-        it("should claim proper value on subsequent stake updating reflection", async () => {
+        it("should claim proper value on stake updating reflection", async () => {
             await MultiRewards.connect(alice).stake(tokenAmount);
-            await makeFewTrades(1, 100_000);
+            await makeFewTrades(1);
 
             const beforeWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
             const beforeContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
@@ -406,23 +423,23 @@ describe("MultiRewards", function () {
             const afterWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
             const afterContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
             const afterUserDaiBalance = await Dai.balanceOf(alice.address);
-            const expectedWithdrawableAmount = getBigNumber("32621448591520465892", 0);
+
+            const expectedWithdrawableAmount = EXPECTED_WITHDRAWABLE_AMOUNT
 
             expect(beforeWithdrawable).to.equal(0);
             expect(beforeUserDaiBalance).to.equal(0);
             expect(beforeContractDaiBalance).to.equal(tokenAmount);
 
             expect(afterWithdrawable).to.equal(0);
-            expect(afterUserDaiBalance).to.equal(expectedWithdrawableAmount.div(10_000).mul(10_000));
-            expect(afterContractDaiBalance).to.equal(tokenAmount.add(getBigNumber("5892", 0)));
-            expect(afterContractDaiBalance.sub(beforeContractDaiBalance)).lt(PRECISION);
+            expect(afterUserDaiBalance).to.equal(expectedWithdrawableAmount);
+            expect(afterContractDaiBalance).to.equal(tokenAmount);
         });
 
         it("should work for many users staking (easy)", async () => {
             await MultiRewards.connect(alice).stake(tokenAmount);
             await MultiRewards.connect(bob).stake(tokenAmount);
 
-            await makeFewTrades(1, 100_000);
+            await makeFewTrades(1);
             // make bob have zero dai and trigger dividend distribution
             await Dai.connect(bob).transfer(deployer.address, await Dai.balanceOf(bob.address));
             await Digits.connect(bob).transfer(Digits.address, 0);
@@ -439,8 +456,9 @@ describe("MultiRewards", function () {
             const afterContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
             const afterAliceDaiBalance = await Dai.balanceOf(alice.address);
             const afterBobDaiBalance = await Dai.balanceOf(bob.address);
-            const expectedWithdrawableAmount = getBigNumber("32621448591520465892", 0).mul(2);
-            const expectedWithdrawableAmountperUser = expectedWithdrawableAmount.div(20_000).mul(10_000);
+
+            const expectedWithdrawableAmount = EXPECTED_WITHDRAWABLE_AMOUNT.mul(2);
+            const expectedWithdrawableAmountperUser = expectedWithdrawableAmount.div(2);
 
             expect(beforeWithdrawable).to.equal(expectedWithdrawableAmount);
             expect(beforeAliceDaiBalance).to.equal(0);
@@ -451,14 +469,268 @@ describe("MultiRewards", function () {
             expect(afterAliceDaiBalance).to.equal(afterBobDaiBalance);
             expect(afterAliceDaiBalance).to.equal(expectedWithdrawableAmountperUser);
             expect(afterBobDaiBalance).to.equal(expectedWithdrawableAmountperUser);
-            expect(afterContractDaiBalance).to.equal(tokenAmount.add((getBigNumber("5892", 0)).mul(2)));
+            expect(afterContractDaiBalance).to.equal(tokenAmount);
             expect(afterContractDaiBalance.sub(beforeContractDaiBalance)).lt(PRECISION);
+        });
+
+        it("should work for many users staking (complex)", async () => {
+            await MultiRewards.connect(alice).stake(tokenAmount);
+            await MultiRewards.connect(bob).stake(tokenAmount);
+
+            await makeFewTrades(1);
+            // make bob have zero dai and trigger dividend distribution
+            await Dai.connect(bob).transfer(deployer.address, await Dai.balanceOf(bob.address));
+            await Digits.connect(bob).transfer(Digits.address, 0);
+
+            const beforeWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const beforeContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            const beforeAliceDaiBalance = await Dai.balanceOf(alice.address);
+            const beforeBobDaiBalance = await Dai.balanceOf(bob.address);
+
+            await MultiRewards.connect(bob).stake(tokenAmount);
+            await MultiRewards.connect(bob).stake(tokenAmount);
+
+            const duringWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const duringContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            const duringAliceDaiBalance = await Dai.balanceOf(alice.address);
+            const duringBobDaiBalance = await Dai.balanceOf(bob.address);
+
+            await makeFewTrades(1);
+            // make bob have zero dai from trade and trigger dividend distribution
+            await Dai.connect(bob).transfer(deployer.address, await Dai.balanceOf(bob.address));
+            await Digits.connect(bob).transfer(Digits.address, 0);
+
+            await MultiRewards.connect(alice).stake(tokenAmount);
+            await MultiRewards.connect(bob).stake(tokenAmount);
+            const afterContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            const afterAliceDaiBalance = await Dai.balanceOf(alice.address);
+            const afterBobDaiBalance = await Dai.balanceOf(bob.address);
+
+            const expectedWithdrawableAmount = EXPECTED_WITHDRAWABLE_AMOUNT.mul(2);
+            const expectedWithdrawableAmountperUser = expectedWithdrawableAmount.div(2);
+
+            expect(beforeWithdrawable).to.equal(expectedWithdrawableAmount);
+            expect(beforeAliceDaiBalance).to.equal(0);
+            expect(beforeBobDaiBalance).to.equal(0);
+            expect(beforeContractDaiBalance).to.equal(tokenAmount);
+
+            expect(duringWithdrawable).to.equal(0);
+            expect(duringAliceDaiBalance).to.equal(0);
+            expect(duringBobDaiBalance).to.equal(expectedWithdrawableAmountperUser);
+            expect(duringContractDaiBalance).to.equal(tokenAmount.add(expectedWithdrawableAmountperUser));
+            expect(duringContractDaiBalance.sub(beforeContractDaiBalance).sub(expectedWithdrawableAmountperUser)).lt(PRECISION);
+
+            expect((afterAliceDaiBalance.sub(expectedWithdrawableAmountperUser)).mul(3).div(PRECISION)).to.equal(afterBobDaiBalance.div(PRECISION));
+            expect(afterContractDaiBalance.div(PRECISION)).to.equal(tokenAmount.div(PRECISION));
+            expect(afterContractDaiBalance.sub(beforeContractDaiBalance)).lt(PRECISION);
+        });
+
+        it("is not called during getReward on paused contract", async () => {
+            await MultiRewards.connect(alice).stake(tokenAmount);
+            await makeFewTrades(1);
+            await MultiRewards.setPaused(true);
+
+            const beforeAliceDigitsBalance = await Digits.balanceOf(alice.address);
+            const beforeWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const beforeDividendTrackerDaiBalance = await Dai.balanceOf(await Digits.dividendTracker());
+            const rewardRate = (await MultiRewards.rewardData(Dai.address))["rewardRate"];
+            const earned = await MultiRewards.earned(alice.address, Dai.address);
+
+            const action = MultiRewards.connect(alice).getReward();
+            await expect(action).to.not.emit(MultiRewards, "ReflectionPaid");
+
+            const afterAliceDigitsBalance = await Digits.balanceOf(alice.address);
+            const afterAliceDaiBalance = await Dai.balanceOf(alice.address);
+            const afterWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const afterDividendTrackerDaiBalance = await Dai.balanceOf(await Digits.dividendTracker());
+
+            expect(beforeAliceDigitsBalance).to.equal(initialUserAmount.sub(tokenAmount));
+            expect(afterAliceDigitsBalance).to.equal(beforeAliceDigitsBalance);
+            expect(beforeDividendTrackerDaiBalance).to.equal(0);
+            expect(afterDividendTrackerDaiBalance).to.equal(0);
+            expect(beforeWithdrawable).to.equal(0);
+            expect(afterWithdrawable).to.equal(0);
+            expect(afterAliceDaiBalance.div(10000)).to.equal(earned.add(rewardRate).div(10000));
+        });
+
+        it("should claim proper value on withdraw", async () => {
+            await MultiRewards.connect(alice).stake(tokenAmount);
+            await makeFewTrades(1);
+            // trigger dividend distribution
+            await Digits.connect(bob).transfer(Digits.address, 0);
+
+            const beforeWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const beforeContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            const beforeUserDaiBalance = await Dai.balanceOf(alice.address);
+            const beforeUserDigitsBalance = await Digits.balanceOf(alice.address);
+
+            await MultiRewards.connect(alice).withdraw(tokenAmount);
+
+            const afterWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const afterContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            const afterUserDaiBalance = await Dai.balanceOf(alice.address);
+            const afterUserDigitsBalance = await Digits.balanceOf(alice.address);
+
+            expect(beforeWithdrawable).to.equal(EXPECTED_WITHDRAWABLE_AMOUNT);
+            expect(beforeUserDaiBalance).to.equal(0);
+            expect(beforeContractDaiBalance).to.equal(tokenAmount);
+            expect(beforeUserDigitsBalance).to.equal(initialUserAmount.sub(tokenAmount));
+
+            expect(afterWithdrawable).to.equal(0);
+            expect(afterUserDaiBalance).to.equal(EXPECTED_WITHDRAWABLE_AMOUNT);
+            expect(afterContractDaiBalance).to.equal(tokenAmount);
+            expect(afterUserDigitsBalance).to.equal(initialUserAmount);
+        });
+
+        it("should claim proper value on withdraw updating reflection", async () => {
+            await MultiRewards.connect(alice).stake(tokenAmount);
+            await makeFewTrades(1);
+
+            const beforeWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const beforeContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            const beforeUserDaiBalance = await Dai.balanceOf(alice.address);
+            const beforeUserDigitsBalance = await Digits.balanceOf(alice.address);
+
+            await MultiRewards.connect(alice).withdraw(tokenAmount);
+
+            const afterWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const afterContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            const afterUserDaiBalance = await Dai.balanceOf(alice.address);
+            const afterUserDigitsBalance = await Digits.balanceOf(alice.address);
+
+            expect(beforeWithdrawable).to.equal(0);
+            expect(beforeUserDaiBalance).to.equal(0);
+            expect(beforeContractDaiBalance).to.equal(tokenAmount);
+            expect(beforeUserDigitsBalance).to.equal(initialUserAmount.sub(tokenAmount));
+
+            expect(afterWithdrawable).to.equal(0);
+            expect(afterUserDaiBalance).to.equal(EXPECTED_WITHDRAWABLE_AMOUNT);
+            expect(afterContractDaiBalance).to.equal(tokenAmount);
+            expect(afterUserDigitsBalance).to.equal(initialUserAmount);
+        });
+
+        it("should claim proper value on getReward", async () => {
+            await MultiRewards.connect(alice).stake(tokenAmount);
+            await makeFewTrades(1);
+            // trigger dividend distribution
+            await Digits.connect(bob).transfer(Digits.address, 0);
+
+            const beforeWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const beforeContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            const beforeUserDaiBalance = await Dai.balanceOf(alice.address);
+            const beforeUserDigitsBalance = await Digits.balanceOf(alice.address);
+            const rewardRate = (await MultiRewards.rewardData(Dai.address))["rewardRate"];
+            const earned = await MultiRewards.earned(alice.address, Dai.address);
+
+            await MultiRewards.connect(alice).getReward();
+
+            const afterWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const afterContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            const afterUserDaiBalance = await Dai.balanceOf(alice.address);
+            const afterUserDigitsBalance = await Digits.balanceOf(alice.address);
+
+            expect(beforeWithdrawable).to.equal(EXPECTED_WITHDRAWABLE_AMOUNT);
+            expect(beforeUserDaiBalance).to.equal(0);
+            expect(beforeContractDaiBalance).to.equal(tokenAmount);
+            expect(beforeUserDigitsBalance).to.equal(initialUserAmount.sub(tokenAmount));
+
+            expect(afterWithdrawable).to.equal(0);
+            expect(afterUserDaiBalance.div(PRECISION)).to.equal(earned.add(rewardRate).add(EXPECTED_WITHDRAWABLE_AMOUNT).div(PRECISION));
+            expect(afterContractDaiBalance.div(PRECISION)).to.equal(tokenAmount.sub(rewardRate.mul(3)).div(PRECISION));
+            expect(afterUserDigitsBalance).to.equal(beforeUserDigitsBalance);
+        });
+
+        it("should claim proper value on getReward updating reflection", async () => {
+            await MultiRewards.connect(alice).stake(tokenAmount);
+            await makeFewTrades(1);
+
+            const beforeWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const beforeContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            const beforeUserDaiBalance = await Dai.balanceOf(alice.address);
+            const beforeUserDigitsBalance = await Digits.balanceOf(alice.address);
+            const rewardRate = (await MultiRewards.rewardData(Dai.address))["rewardRate"];
+            const earned = await MultiRewards.earned(alice.address, Dai.address);
+
+            await MultiRewards.connect(alice).getReward();
+
+            const afterWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const afterContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            const afterUserDaiBalance = await Dai.balanceOf(alice.address);
+            const afterUserDigitsBalance = await Digits.balanceOf(alice.address);
+
+            expect(beforeWithdrawable).to.equal(0);
+            expect(beforeUserDaiBalance).to.equal(0);
+            expect(beforeContractDaiBalance).to.equal(tokenAmount);
+            expect(beforeUserDigitsBalance).to.equal(initialUserAmount.sub(tokenAmount));
+
+            expect(afterWithdrawable).to.equal(0);
+            expect(afterUserDaiBalance.div(PRECISION)).to.equal(earned.add(EXPECTED_WITHDRAWABLE_AMOUNT).add(rewardRate).div(PRECISION));
+            expect(afterContractDaiBalance.div(PRECISION)).to.equal(tokenAmount.sub(rewardRate.mul(2)).div(PRECISION));
+            expect(afterUserDigitsBalance).to.equal(beforeUserDigitsBalance);
+        });
+
+        it("should claim proper value on exit", async () => {
+            await MultiRewards.connect(alice).stake(tokenAmount);
+            await makeFewTrades(1);
+            // trigger dividend distribution
+            await Digits.connect(bob).transfer(Digits.address, 0);
+
+            const beforeWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const beforeContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            const beforeUserDaiBalance = await Dai.balanceOf(alice.address);
+            const beforeUserDigitsBalance = await Digits.balanceOf(alice.address);
+            const rewardRate = (await MultiRewards.rewardData(Dai.address))["rewardRate"];
+            const earned = await MultiRewards.earned(alice.address, Dai.address);
+
+            await MultiRewards.connect(alice).exit();
+
+            const afterWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const afterContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            const afterUserDaiBalance = await Dai.balanceOf(alice.address);
+            const afterUserDigitsBalance = await Digits.balanceOf(alice.address);
+
+            expect(beforeWithdrawable).to.equal(EXPECTED_WITHDRAWABLE_AMOUNT);
+            expect(beforeUserDaiBalance).to.equal(0);
+            expect(beforeContractDaiBalance).to.equal(tokenAmount);
+            expect(beforeUserDigitsBalance).to.equal(initialUserAmount.sub(tokenAmount));
+
+            expect(afterWithdrawable).to.equal(0);
+            expect(afterUserDaiBalance.div(PRECISION)).to.equal(earned.add(EXPECTED_WITHDRAWABLE_AMOUNT).add(rewardRate).div(PRECISION));
+            expect(afterContractDaiBalance.div(PRECISION)).to.equal(tokenAmount.sub(rewardRate.mul(3)).div(PRECISION));
+            expect(afterUserDigitsBalance).to.equal(initialUserAmount);
+        });
+
+        it("should claim proper value on exit updating reflection", async () => {
+            await MultiRewards.connect(alice).stake(tokenAmount);
+            await makeFewTrades(1);
+
+            const beforeWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const beforeContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            const beforeUserDaiBalance = await Dai.balanceOf(alice.address);
+            const beforeUserDigitsBalance = await Digits.balanceOf(alice.address);
+            const rewardRate = (await MultiRewards.rewardData(Dai.address))["rewardRate"];
+            const earned = await MultiRewards.earned(alice.address, Dai.address);
+
+            await MultiRewards.connect(alice).exit();
+
+            const afterWithdrawable = await Digits.withdrawableDividendOf(MultiRewards.address);
+            const afterContractDaiBalance = await Dai.balanceOf(MultiRewards.address);
+            const afterUserDaiBalance = await Dai.balanceOf(alice.address);
+            const afterUserDigitsBalance = await Digits.balanceOf(alice.address);
+
+            expect(beforeWithdrawable).to.equal(0);
+            expect(beforeUserDaiBalance).to.equal(0);
+            expect(beforeContractDaiBalance).to.equal(tokenAmount);
+            expect(beforeUserDigitsBalance).to.equal(initialUserAmount.sub(tokenAmount));
+
+            expect(afterWithdrawable).to.equal(0);
+            expect(afterUserDaiBalance.div(PRECISION)).to.equal(earned.add(EXPECTED_WITHDRAWABLE_AMOUNT).add(rewardRate).div(PRECISION));
+            expect(afterContractDaiBalance.div(PRECISION)).to.equal(tokenAmount.sub(rewardRate.mul(2)).div(PRECISION));
+            expect(afterUserDigitsBalance).to.equal(initialUserAmount);
         });
     });
 
     describe("withdraw", () => {
-        // TODO: multiuser tests
-
         beforeEach("added rewards", async () => {
             await MultiRewards.addReward(Dai.address, deployer.address, rewardsDuration);
             await MultiRewards.notifyRewardAmount(Dai.address, tokenAmount);
@@ -499,8 +771,6 @@ describe("MultiRewards", function () {
     });
 
     describe("exit", () => {
-        // TODO: add tests for multiple rewards
-        // TODO: multiuser tests, finish period tests etc.
         beforeEach("added rewards", async () => {
             await MultiRewards.addReward(Dai.address, deployer.address, rewardsDuration);
             await MultiRewards.notifyRewardAmount(Dai.address, tokenAmount);
@@ -553,8 +823,6 @@ describe("MultiRewards", function () {
     });
 
     describe("getReward", () => {
-        // TODO: add tests for multiple rewards
-        // TODO: multiuser tests, finish period tests etc.
         beforeEach("added rewards", async () => {
             await MultiRewards.addReward(Dai.address, deployer.address, rewardsDuration);
             await MultiRewards.notifyRewardAmount(Dai.address, tokenAmount);
@@ -594,7 +862,6 @@ describe("MultiRewards", function () {
             const rewardPerToken = await MultiRewards.rewardPerToken(Dai.address);
             expect(rewardPerToken).to.be.equal(rewardPerTokenStored);
         });
-        // Add test with block in the future
     });
 
     describe("getRewardForDuration", () => {
@@ -621,6 +888,34 @@ describe("MultiRewards", function () {
             const claimableRewards = await MultiRewards.earned(alice.address, Dai.address);
             expect(claimableRewards).to.be.equal(getBigNumber(0));
         });
-        // Add test checking after passing some time
+    });
+
+    describe("dividendsEarned", () => {
+        beforeEach("added rewards", async () => {
+            await MultiRewards.addReward(Dai.address, deployer.address, rewardsDuration);
+            await MultiRewards.notifyRewardAmount(Dai.address, tokenAmount);
+        });
+
+        it('should return zero on empty', async () => {
+            const claimableDividendsAlice = await MultiRewards.dividendsEarned(alice.address);
+            expect(claimableDividendsAlice).to.be.equal(getBigNumber(0));
+        });
+
+        it('should return zero on just staked', async () => {
+            await MultiRewards.connect(alice).stake(tokenAmount);
+            const claimableDividendsAlice = await MultiRewards.dividendsEarned(alice.address);
+            expect(claimableDividendsAlice).to.be.equal(getBigNumber(0));
+        });
+
+        it('should return dividend earned', async () => {
+            await MultiRewards.connect(alice).stake(tokenAmount);
+            await makeFewTrades(1);
+            await MultiRewards.connect(bob).stake(tokenAmount);
+            const claimableDividendsAlice = await MultiRewards.dividendsEarned(alice.address);
+            const claimableDividendsBob = await MultiRewards.dividendsEarned(bob.address);
+            expect(claimableDividendsAlice).to.be.equal(EXPECTED_WITHDRAWABLE_AMOUNT);
+            expect(claimableDividendsBob).to.be.equal(0);
+
+        });
     });
 });
