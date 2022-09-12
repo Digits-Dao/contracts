@@ -1,5 +1,5 @@
 {
-  "name": "multi-reward-distribution",
+  "name": "contracts",
   "scripts": {
     "test": "hardhat test",
     "compile": "hardhat compile"
@@ -25,20 +25,12 @@
     "typechain": "^7.0.0",
     "typescript": "^4.5.4"
   },
-  "description": "MultiRewardDistribution contract for Wonderland",
+  "description": "Contracts of DigitsDAO Protocol",
   "version": "1.0.0",
   "directories": {
     "test": "test"
   },
   "dependencies": {},
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Wonderland-Money/multi-reward-distribution.git"
-  },
   "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/Wonderland-Money/multi-reward-distribution/issues"
-  },
-  "homepage": "https://github.com/Wonderland-Money/multi-reward-distribution#readme"
+  "license": "ISC"
 }

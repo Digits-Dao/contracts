@@ -1,8 +1,8 @@
-# MultiRewardDistribution
+# DigitsDao Protocol contracts
 
-[![Tests](https://github.com/Wonderland-Money/multi-reward-distribution/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Wonderland-Money/multi-reward-distribution/actions/workflows/tests.yml)
+[![DigitsDao](https://www.digitsdao.finance)
 
-This repository contains the MultiRewardDistribution.
+This repository contains the contracts of DigitsDAO Protocol.
 
 ## Testing
 
