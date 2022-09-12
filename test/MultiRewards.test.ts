@@ -1,9 +1,10 @@
 import { ethers, network } from "hardhat";
-import { MultiRewards, Digits, IERC20, TokenStorage, IUniswapV2Router02 } from "../typechain-types";
+import { MultiRewards, Digits, IERC20, TokenStorage, IUniswapV2Router02, WrapERC20 } from "../typechain-types";
 import { expect } from "chai";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { getBigNumber } from "../utils";
 import { constants } from "ethers";
+import { setUncaughtExceptionCaptureCallback } from "process";
 
 describe("MultiRewards", function () {
     let MultiRewards: MultiRewards;
@@ -214,6 +215,22 @@ describe("MultiRewards", function () {
             expect(beforeWithdrawableReflection).to.be.equal(afterWithdrawableReflection);
             expect(beforeDaiBalance).to.be.equal(afterDaiBalance.sub(tokenAmount));
             expect(beforeWithdrawableReflection.gt(getBigNumber(0)));
+        });
+
+        it("should not allow overflow in rewardRate", async () => {
+            const action = MultiRewards.notifyRewardAmount(Dai.address, constants.MaxUint256);
+            await expect(action).to.revertedWith("Reward too large, would lock")
+        });
+
+        it("should not allow overflow in rewardRate (edge case)", async () => {
+            const tokenFactory = await ethers.getContractFactory("WrapERC20");
+            const Token = (await tokenFactory.deploy("Token", "T")) as WrapERC20;
+            await Token.mint(deployer.address, constants.MaxUint256);
+            await Token.approve(MultiRewards.address, constants.MaxUint256);
+            await MultiRewards.addReward(Token.address, deployer.address, rewardsDuration);
+            await MultiRewards.notifyRewardAmount(Token.address, constants.MaxUint256.div(getBigNumber(1, 18)));
+            const action = MultiRewards.rewardPerToken(Token.address);
+            await expect(action).to.not.be.reverted;
         });
     });
 

@@ -471,6 +471,8 @@ contract MultiRewards is ReentrancyGuard, Pausable {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
+    uint256 private MAXUINT256 = 2**256 - 1;
+
     /* ========== STATE VARIABLES ========== */
 
     struct Reward {
@@ -663,7 +665,11 @@ contract MultiRewards is ReentrancyGuard, Pausable {
         // Reccomendation from Peckshield's audit of similar contract, they state
         // that too large reward can cause overflow in 'RewardPerToken()' function.
         // https://app.topshelf.finance/PeckShield-Audit-Report-Topshelf-v1.0.pdf
-        require(reward < uint256(-1).div(1e32), "Reward too large, would lock");
+        require(
+            reward.div(rewardData[_rewardsToken].rewardsDuration) <
+                MAXUINT256.div(1e18),
+            "Reward too large, would lock"
+        );
         // handle the transfer of reward tokens via `transferFrom` to reduce the number
         // of transactions required and ensure correctness of the reward amount
         IERC20(_rewardsToken).safeTransferFrom(
