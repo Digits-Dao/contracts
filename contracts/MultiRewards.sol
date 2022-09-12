@@ -1,3 +1,7 @@
+/**
+ * Fork of https://github.com/curvefi/multi-rewards/blob/master/contracts/MultiRewards.sol
+ */
+
 pragma solidity 0.5.17;
 
 library Address {

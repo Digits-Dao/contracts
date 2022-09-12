@@ -4,6 +4,8 @@
 
 This repository contains the contracts of DigitsDAO Protocol.
 
+MultiRewards.sol contract is a fork of [Curve's Finance MultiRewards contract](https://github.com/curvefi/multi-rewards/blob/master/contracts/MultiRewards.sol).
+
 ## Testing
 
 ```sh
