@@ -4,7 +4,6 @@ import { expect } from "chai";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { getBigNumber } from "../utils";
 import { constants } from "ethers";
-import { setUncaughtExceptionCaptureCallback } from "process";
 
 describe("MultiRewards", function () {
     let MultiRewards: MultiRewards;
