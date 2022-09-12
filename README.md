@@ -1,6 +1,6 @@
 # DigitsDao Protocol contracts
 
-[![DigitsDao](https://www.digitsdao.finance)
+[DigitsDao](https://www.digitsdao.finance)
 
 This repository contains the contracts of DigitsDAO Protocol.
 
