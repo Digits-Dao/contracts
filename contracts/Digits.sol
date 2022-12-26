@@ -32,6 +32,8 @@ contract Digits is Ownable, IERC20 {
 
     address public immutable uniswapRouter;
     address public immutable dai;
+    // Can trigger dividend distribution.
+    address public multiRewards;
 
     uint256 public treasuryFeeBPS = 700;
     uint256 public liquidityFeeBPS = 200;
@@ -212,6 +214,41 @@ contract Digits is Ownable, IERC20 {
         );
         _approve(_msgSender(), spender, currentAllowance - subtractedValue);
         return true;
+    }
+
+    function setMultiRewardsAddress(address _multiRewards) external onlyOwner {
+        require(_multiRewards != address(0), "Cannot set address zero");
+        multiRewards = _multiRewards;
+    }
+
+    function triggerDividendDistribution() external {
+        require(msg.sender == multiRewards, "Only callable by MultiRewards");
+
+        uint256 contractTokenBalance = IERC20(this).balanceOf(
+            address(tokenStorage)
+        );
+
+        uint256 contractDaiBalance = IERC20(dai).balanceOf(
+            address(tokenStorage)
+        );
+
+        bool canSwap = contractTokenBalance >= swapTokensAtAmount;
+
+        if (
+            swapEnabled && // True
+            canSwap && // true
+            !swapping // swapping=false !false true
+        ) {
+            swapping = true;
+
+            if (!swapAllToken) {
+                contractTokenBalance = swapTokensAtAmount;
+            }
+            _executeSwap(contractTokenBalance, contractDaiBalance);
+
+            lastSwapTime = block.timestamp;
+            swapping = false;
+        }
     }
 
     function transfer(address recipient, uint256 amount)

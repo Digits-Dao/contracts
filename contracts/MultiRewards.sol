@@ -469,13 +469,15 @@ interface IDigits {
         external
         view
         returns (uint256);
+
+    function triggerDividendDistribution() external;
 }
 
 contract MultiRewards is ReentrancyGuard, Pausable {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
-    uint256 private MAXUINT256 = 2**256 - 1;
+    uint256 private constant MAXUINT256 = 2**256 - 1;
 
     /* ========== STATE VARIABLES ========== */
 
@@ -522,7 +524,10 @@ contract MultiRewards is ReentrancyGuard, Pausable {
         address _rewardsDistributor,
         uint256 _rewardsDuration
     ) public onlyOwner {
-        require(rewardData[_rewardsToken].rewardsDuration == 0);
+        require(
+            rewardData[_rewardsToken].rewardsDuration == 0,
+            "Token was already added"
+        );
         require(_rewardsDuration > 0, "Reward duration must be non-zero");
         rewardTokens.push(_rewardsToken);
         rewardData[_rewardsToken].rewardsDistributor = _rewardsDistributor;
@@ -643,7 +648,7 @@ contract MultiRewards is ReentrancyGuard, Pausable {
     }
 
     function getReward() public nonReentrant updateReward(msg.sender) {
-        for (uint256 i; i < rewardTokens.length; i++) {
+        for (uint256 i = 0; i < rewardTokens.length; i++) {
             address _rewardsToken = rewardTokens[i];
             uint256 reward = rewards[msg.sender][_rewardsToken];
             if (reward > 0) {
@@ -765,10 +770,11 @@ contract MultiRewards is ReentrancyGuard, Pausable {
      * Process reflection rewards before each `stake()`, `withdraw()`, `getReward()`.
      */
     function _processReflectionReward(address account) private {
-        // This dummy transfer triggers dividend distribution
-        stakingToken.transfer(address(stakingToken), 0);
+        // Trigger dividend distribution
+        _digits.triggerDividendDistribution();
         // We trust Digits implementation that `withdrawableDividendOf()`
-        // is equal to amount of dai got from `claim()`
+        // is equal to amount checked in `processAccount()` in DividendTracker.sol.
+        // which is called by `claim()` in Digits.sol
         uint256 reflection = _digits.withdrawableDividendOf(address(this));
         if (reflection > 0) {
             _digits.claim();

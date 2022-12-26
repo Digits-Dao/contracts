@@ -58,6 +58,7 @@ describe("MultiRewards", function () {
         await Digits.excludeFromFees(MultiRewards.address, true);
         await Digits.excludeFromMaxTx(MultiRewards.address, true);
         await Digits.excludeFromMaxWallet(MultiRewards.address, true);
+        await Digits.setMultiRewardsAddress(MultiRewards.address);
         await Digits.transfer(alice.address, initialUserAmount);
         await Digits.transfer(bob.address, initialUserAmount);
         await Digits.connect(alice).approve(MultiRewards.address, constants.MaxUint256);
