@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 
 pragma solidity ^0.8.10;
-pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 import "./DividendTracker.sol";
@@ -25,6 +25,7 @@ interface ITokenStorage {
 }
 
 contract Digits is Ownable, IERC20 {
+    using SafeERC20 for IERC20;
     address constant DEAD = 0x000000000000000000000000000000000000dEaD;
 
     string private constant _name = "Digits";
@@ -48,6 +49,8 @@ contract Digits is Ownable, IERC20 {
     bool public taxEnabled = true;
     bool public compoundingEnabled = true;
 
+    uint256 private _maxTxAmount;
+    uint256 private _maxWallet;
     uint256 private _totalSupply;
     bool private swapping;
 
@@ -143,6 +146,9 @@ contract Digits is Ownable, IERC20 {
         excludeFromMaxWallet(address(dividendTracker), true);
 
         _mint(owner(), 1000000000 * (10**18));
+        // Calcualte initial values, update later in setters.
+        _maxTxAmount = (totalSupply() * maxTxBPS) / 10000;
+        _maxWallet = (totalSupply() * maxWalletBPS) / 10000;
     }
 
     function name() external view returns (string memory) {
@@ -290,14 +296,8 @@ contract Digits is Ownable, IERC20 {
             "Not Open"
         );
 
-        require(sender != address(0), "Digits: transfer from the zero address");
-        require(
-            recipient != address(0),
-            "Digits: transfer to the zero address"
-        );
-
-        uint256 _maxTxAmount = (totalSupply() * maxTxBPS) / 10000;
-        uint256 _maxWallet = (totalSupply() * maxWalletBPS) / 10000;
+        require(sender != address(0), "Digits: transfer from 0 address");
+        require(recipient != address(0), "Digits: transfer to 0 address");
         require(
             amount <= _maxTxAmount || _isExcludedFromMaxTx[sender],
             "TX Limit Exceeded"
@@ -317,10 +317,7 @@ contract Digits is Ownable, IERC20 {
         }
 
         uint256 senderBalance = _balances[sender];
-        require(
-            senderBalance >= amount,
-            "Digits: transfer amount exceeds balance"
-        );
+        require(senderBalance >= amount, "Digits: transfer exceeds balance");
 
         uint256 contractTokenBalance = IERC20(this).balanceOf(
             address(tokenStorage)
@@ -351,7 +348,7 @@ contract Digits is Ownable, IERC20 {
             swapping = false;
         }
 
-        bool takeFee;
+        bool takeFee = false;
 
         if (
             sender == address(uniswapV2Pair) ||
@@ -420,17 +417,17 @@ contract Digits is Ownable, IERC20 {
     }
 
     function _executeSwap(uint256 tokens, uint256 dais) private {
-        if (tokens <= 0) {
+        if (tokens == 0) {
             return;
         }
 
-        uint256 swapTokensMarketing;
-        if (address(marketingWallet) != address(0)) {
+        uint256 swapTokensMarketing = 0;
+        if (address(marketingWallet) != address(0) && totalFeeBPS > 0) {
             swapTokensMarketing = (tokens * treasuryFeeBPS) / totalFeeBPS;
         }
 
-        uint256 swapTokensDividends;
-        if (dividendTracker.totalSupply() > 0) {
+        uint256 swapTokensDividends = 0;
+        if (dividendTracker.totalSupply() > 0 && totalFeeBPS > 0) {
             swapTokensDividends = (tokens * dividendFeeBPS) / totalFeeBPS;
         }
 
@@ -568,14 +565,14 @@ contract Digits is Ownable, IERC20 {
     function claim() external {
         bool result = dividendTracker.processAccount(_msgSender());
 
-        require(result == true, "Digits: claim failed.");
+        require(result, "Digits: claim failed.");
     }
 
     function compound() external {
         require(compoundingEnabled, "Digits: compounding is not enabled");
         bool result = dividendTracker.compoundAccount(_msgSender());
 
-        require(result == true, "Digits: compounding failed.");
+        require(result, "Digits: compounding failed.");
     }
 
     function withdrawableDividendOf(address account)
@@ -655,7 +652,7 @@ contract Digits is Ownable, IERC20 {
     function setMaxTxBPS(uint256 bps) external onlyOwner {
         require(bps >= 49 && bps <= 10000, "BPS must be between 49 and 10000");
         maxTxBPS = bps;
-
+        _maxTxAmount = (totalSupply() * maxTxBPS) / 10000;
         emit SetMaxTxBPS(bps);
     }
 
@@ -675,7 +672,7 @@ contract Digits is Ownable, IERC20 {
             "BPS must be between 100 and 10000"
         );
         maxWalletBPS = bps;
-
+        _maxWallet = (totalSupply() * maxWalletBPS) / 10000;
         emit SetMaxWalletBPS(bps);
     }
 
@@ -697,7 +694,7 @@ contract Digits is Ownable, IERC20 {
     }
 
     function rescueToken(address _token, uint256 _amount) external onlyOwner {
-        IERC20(_token).transfer(msg.sender, _amount);
+        IERC20(_token).safeTransfer(msg.sender, _amount);
     }
 
     function rescueETH(uint256 _amount) external onlyOwner {

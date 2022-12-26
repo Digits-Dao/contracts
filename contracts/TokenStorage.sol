@@ -4,6 +4,7 @@ pragma solidity ^0.8.10;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 
 interface IDividendTracker {
@@ -11,6 +12,7 @@ interface IDividendTracker {
 }
 
 contract TokenStorage is Ownable {
+    using SafeERC20 for IERC20;
     address public immutable dai;
     address public liquidityWallet;
     address public immutable tokenAddress;
@@ -28,6 +30,18 @@ contract TokenStorage is Ownable {
         address _dividendTracker,
         address _uniswapRouter
     ) {
+        require(_dai != address(0), "DAI address zero");
+        require(_tokenAddress != address(0), "Token address zero");
+        require(
+            _liquidityWallet != address(0),
+            "Liquidity wallet address zero"
+        );
+        require(
+            _dividendTracker != address(0),
+            "Dividend tracker address zero"
+        );
+        require(_uniswapRouter != address(0), "Uniswap router address zero");
+
         dai = _dai;
         tokenAddress = _tokenAddress;
         liquidityWallet = _liquidityWallet;
@@ -46,15 +60,15 @@ contract TokenStorage is Ownable {
 
     function transferDai(address to, uint256 amount) external {
         require(
-            managers[msg.sender] == true,
+            managers[msg.sender],
             "This address is not allowed to interact with the contract"
         );
-        IERC20(dai).transfer(to, amount);
+        IERC20(dai).safeTransfer(to, amount);
     }
 
     function swapTokensForDai(uint256 tokens) external {
         require(
-            managers[msg.sender] == true,
+            managers[msg.sender],
             "This address is not allowed to interact with the contract"
         );
         address[] memory path = new address[](2);
@@ -73,7 +87,7 @@ contract TokenStorage is Ownable {
 
     function addLiquidity(uint256 tokens, uint256 dais) external {
         require(
-            managers[msg.sender] == true,
+            managers[msg.sender],
             "This address is not allowed to interact with the contract"
         );
         IERC20(tokenAddress).approve(address(uniswapV2Router), tokens);
@@ -96,7 +110,7 @@ contract TokenStorage is Ownable {
         uint256 daiDividends
     ) external {
         require(
-            managers[msg.sender] == true,
+            managers[msg.sender],
             "This address is not allowed to interact with the contract"
         );
         IERC20(dai).approve(address(dividendTracker), daiDividends);
@@ -109,7 +123,7 @@ contract TokenStorage is Ownable {
 
     function setLiquidityWallet(address _liquidityWallet) external {
         require(
-            managers[msg.sender] == true,
+            managers[msg.sender],
             "This address is not allowed to interact with the contract"
         );
         require(_liquidityWallet != address(0), "Digits: zero!");

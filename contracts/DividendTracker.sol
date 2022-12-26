@@ -4,9 +4,11 @@ pragma solidity ^0.8.10;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 
 contract DividendTracker is Ownable, IERC20 {
+    using SafeERC20 for IERC20;
     address public immutable dai;
 
     string private constant _name = "Digits_DividendTracker";
@@ -35,18 +37,15 @@ contract DividendTracker is Ownable, IERC20 {
     event Claim(address indexed account, uint256 amount);
     event Compound(address indexed account, uint256 amount, uint256 tokens);
 
-    struct AccountInfo {
-        address account;
-        uint256 withdrawableDividends;
-        uint256 totalDividends;
-        uint256 lastClaimTime;
-    }
-
     constructor(
         address _dai,
         address _tokenAddress,
         address _uniswapRouter
     ) {
+        require(_dai != address(0), "DAI address zero");
+        require(_tokenAddress != address(0), "Token address zero");
+        require(_uniswapRouter != address(0), "Uniswap router address zero");
+
         dai = _dai;
         minTokenBalanceForDividends = 10000 * (10**18);
         tokenAddress = _tokenAddress;
@@ -56,7 +55,11 @@ contract DividendTracker is Ownable, IERC20 {
     function distributeDividends(uint256 daiDividends) external {
         require(_totalSupply > 0, "dividends unavailable yet");
         if (daiDividends > 0) {
-            IERC20(dai).transferFrom(msg.sender, address(this), daiDividends);
+            IERC20(dai).safeTransferFrom(
+                msg.sender,
+                address(this),
+                daiDividends
+            );
             magnifiedDividendPerShare =
                 magnifiedDividendPerShare +
                 ((daiDividends * magnitude) / _totalSupply);
@@ -171,7 +174,7 @@ contract DividendTracker is Ownable, IERC20 {
             totalDividendsWithdrawn += _withdrawableDividend;
             emit DividendWithdrawn(account, _withdrawableDividend);
 
-            IERC20(dai).transfer(account, _withdrawableDividend);
+            IERC20(dai).safeTransfer(account, _withdrawableDividend);
 
             return _withdrawableDividend;
         }
@@ -206,8 +209,8 @@ contract DividendTracker is Ownable, IERC20 {
             path[0] = dai;
             path[1] = address(tokenAddress);
 
-            bool success;
-            uint256 tokens;
+            bool success = false;
+            uint256 tokens = 0;
 
             uint256 initTokenBal = IERC20(tokenAddress).balanceOf(account);
             IERC20(dai).approve(
@@ -280,16 +283,14 @@ contract DividendTracker is Ownable, IERC20 {
             uint256
         )
     {
-        AccountInfo memory info;
-        info.account = account;
-        info.withdrawableDividends = withdrawableDividendOf(account);
-        info.totalDividends = accumulativeDividendOf(account);
-        info.lastClaimTime = lastClaimTimes[account];
+        uint256 withdrawableDividends = withdrawableDividendOf(account);
+        uint256 totalDividends = accumulativeDividendOf(account);
+        uint256 lastClaimTime = lastClaimTimes[account];
         return (
-            info.account,
-            info.withdrawableDividends,
-            info.totalDividends,
-            info.lastClaimTime,
+            account,
+            withdrawableDividends,
+            totalDividends,
+            lastClaimTime,
             totalDividendsWithdrawn
         );
     }
