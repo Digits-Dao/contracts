@@ -7,98 +7,57 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
+
 import "./DividendTracker.sol";
+import "./interfaces/ITokenStorage.sol";
+import "./interfaces/IDigits.sol";
 
-interface ITokenStorage {
-    function swapTokensForDai(uint256 tokens) external;
-
-    function transferDai(address to, uint256 amount) external;
-
-    function addLiquidity(uint256 tokens, uint256 dais) external;
-
-    function distributeDividends(
-        uint256 swapTokensDividends,
-        uint256 daiDividends
-    ) external;
-
-    function setLiquidityWallet(address _liquidityWallet) external;
-}
-
-contract Digits is Ownable, IERC20 {
+contract Digits is Ownable, IERC20, IDigits {
     using SafeERC20 for IERC20;
-    address constant DEAD = 0x000000000000000000000000000000000000dEaD;
+
+    /* ============ State ============ */
+
+    address public constant DEAD = 0x000000000000000000000000000000000000dEaD;
 
     string private constant _name = "Digits";
     string private constant _symbol = "DIGITS";
 
-    address public immutable uniswapRouter;
-    address public immutable dai;
-    // Can trigger dividend distribution.
-    address public multiRewards;
+    DividendTracker public immutable dividendTracker;
+    IUniswapV2Router02 public immutable uniswapV2Router;
+    IERC20 public immutable dai;
+    ITokenStorage public tokenStorage;
+
+    address public multiRewards; // Can trigger dividend distribution.
+    address public marketingWallet;
+    address public uniswapV2Pair;
 
     uint256 public treasuryFeeBPS = 700;
     uint256 public liquidityFeeBPS = 200;
     uint256 public dividendFeeBPS = 300;
     uint256 public totalFeeBPS = 1200;
-
     uint256 public swapTokensAtAmount = 100000 * (10**18);
     uint256 public lastSwapTime;
-    bool swapAllToken = true;
+    uint256 public maxTxBPS = 49;
+    uint256 public maxWalletBPS = 200;
 
+    bool public isOpen = false;
+    bool public swapAllToken = true;
     bool public swapEnabled = true;
     bool public taxEnabled = true;
     bool public compoundingEnabled = true;
 
+    mapping(address => bool) public automatedMarketMakerPairs;
+
     uint256 private _maxTxAmount;
     uint256 private _maxWallet;
     uint256 private _totalSupply;
-    bool private swapping;
 
-    address marketingWallet;
+    bool private swapping;
 
     mapping(address => uint256) private _balances;
     mapping(address => mapping(address => uint256)) private _allowances;
     mapping(address => bool) private _isExcludedFromFees;
-    mapping(address => bool) public automatedMarketMakerPairs;
     mapping(address => bool) private _whiteList;
-
-    event SwapAndAddLiquidity(
-        uint256 tokensSwapped,
-        uint256 daiReceived,
-        uint256 tokensIntoLiquidity
-    );
-    event ExcludeFromFees(address indexed account, bool isExcluded);
-    event SetAutomatedMarketMakerPair(address indexed pair, bool indexed value);
-    event SetFee(
-        uint256 _treasuryFee,
-        uint256 _liquidityFee,
-        uint256 _dividendFee
-    );
-    event SwapEnabled(bool enabled);
-    event TaxEnabled(bool enabled);
-    event CompoundingEnabled(bool enabled);
-    event SetTokenStorage(address _tokenStorage);
-    event UpdateDividendSettings(
-        bool _swapEnabled,
-        uint256 _swapTokensAtAmount,
-        bool _swapAllToken
-    );
-    event SetMaxTxBPS(uint256 bps);
-    event ExcludeFromMaxTx(address account, bool excluded);
-    event SetMaxWalletBPS(uint256 bps);
-    event ExcludeFromMaxWallet(address account, bool excluded);
-
-    DividendTracker public immutable dividendTracker;
-    ITokenStorage public tokenStorage;
-    IUniswapV2Router02 public uniswapV2Router;
-
-    address public uniswapV2Pair;
-
-    uint256 public maxTxBPS = 49;
-    uint256 public maxWalletBPS = 200;
-
-    bool isOpen = false;
-
     mapping(address => bool) private _isExcludedFromMaxTx;
     mapping(address => bool) private _isExcludedFromMaxWallet;
 
@@ -108,21 +67,27 @@ contract Digits is Ownable, IERC20 {
         address _marketingWallet,
         address[] memory whitelistAddress
     ) {
-        dai = _dai;
-        uniswapRouter = _uniswapRouter;
+        require(_dai != address(0), "DAI address zero");
+        require(_uniswapRouter != address(0), "Uniswap router address zero");
+        require(
+            _marketingWallet != address(0),
+            "Marketing wallet address zero"
+        );
+
+        dai = IERC20(_dai);
         marketingWallet = _marketingWallet;
         includeToWhiteList(whitelistAddress);
 
-        uniswapV2Router = IUniswapV2Router02(uniswapRouter);
+        uniswapV2Router = IUniswapV2Router02(_uniswapRouter);
         uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory()).createPair(
                 address(this),
-                dai
+                _dai
             );
 
         dividendTracker = new DividendTracker(
-            dai,
+            _dai,
             address(this),
-            uniswapRouter
+            address(uniswapV2Router)
         );
 
         _setAutomatedMarketMakerPair(uniswapV2Pair, true);
@@ -146,10 +111,13 @@ contract Digits is Ownable, IERC20 {
         excludeFromMaxWallet(address(dividendTracker), true);
 
         _mint(owner(), 1000000000 * (10**18));
+
         // Calcualte initial values, update later in setters.
         _maxTxAmount = (totalSupply() * maxTxBPS) / 10000;
         _maxWallet = (totalSupply() * maxWalletBPS) / 10000;
     }
+
+    /* ============ External View Functions ============ */
 
     function name() external view returns (string memory) {
         return _name;
@@ -159,7 +127,7 @@ contract Digits is Ownable, IERC20 {
         return _symbol;
     }
 
-    function decimals() external pure returns (uint8) {
+    function decimals() external view returns (uint8) {
         return 18;
     }
 
@@ -197,6 +165,40 @@ contract Digits is Ownable, IERC20 {
         return true;
     }
 
+    function withdrawableDividendOf(address account)
+        external
+        view
+        returns (uint256)
+    {
+        return dividendTracker.withdrawableDividendOf(account);
+    }
+
+    function isExcludedFromDividends(address account)
+        external
+        view
+        returns (bool)
+    {
+        return dividendTracker.isExcludedFromDividends(account);
+    }
+
+    function isExcludedFromFees(address account) external view returns (bool) {
+        return _isExcludedFromFees[account];
+    }
+
+    function isExcludedFromMaxTx(address account) external view returns (bool) {
+        return _isExcludedFromMaxTx[account];
+    }
+
+    function isExcludedFromMaxWallet(address account)
+        external
+        view
+        returns (bool)
+    {
+        return _isExcludedFromMaxWallet[account];
+    }
+
+    /* ============ External Functions ============ */
+
     function increaseAllowance(address spender, uint256 addedValue)
         external
         returns (bool)
@@ -216,27 +218,18 @@ contract Digits is Ownable, IERC20 {
         uint256 currentAllowance = _allowances[_msgSender()][spender];
         require(
             currentAllowance >= subtractedValue,
-            "Digits: decreased allowance below zero"
+            "Digits: decreased allowance < 0"
         );
         _approve(_msgSender(), spender, currentAllowance - subtractedValue);
         return true;
     }
 
-    function setMultiRewardsAddress(address _multiRewards) external onlyOwner {
-        require(_multiRewards != address(0), "Cannot set address zero");
-        multiRewards = _multiRewards;
-    }
-
     function triggerDividendDistribution() external {
         require(msg.sender == multiRewards, "Only callable by MultiRewards");
 
-        uint256 contractTokenBalance = IERC20(this).balanceOf(
-            address(tokenStorage)
-        );
+        uint256 contractTokenBalance = balanceOf(address(tokenStorage));
 
-        uint256 contractDaiBalance = IERC20(dai).balanceOf(
-            address(tokenStorage)
-        );
+        uint256 contractDaiBalance = dai.balanceOf(address(tokenStorage));
 
         bool canSwap = contractTokenBalance >= swapTokensAtAmount;
 
@@ -274,13 +267,25 @@ contract Digits is Ownable, IERC20 {
     ) external virtual override returns (bool) {
         _transfer(sender, recipient, amount);
         uint256 currentAllowance = _allowances[sender][_msgSender()];
-        require(
-            currentAllowance >= amount,
-            "Digits: transfer amount exceeds allowance"
-        );
+        require(currentAllowance >= amount, "Digits: tx amount > allowance");
         _approve(sender, _msgSender(), currentAllowance - amount);
         return true;
     }
+
+    function claim() external {
+        bool result = dividendTracker.processAccount(_msgSender());
+
+        require(result, "Digits: claim failed");
+    }
+
+    function compound() external {
+        require(compoundingEnabled, "Digits: compounding not enabled");
+        bool result = dividendTracker.compoundAccount(_msgSender());
+
+        require(result, "Digits: compounding failed");
+    }
+
+    /* ============ Internal/Private Functions ============ */
 
     function _transfer(
         address sender,
@@ -319,12 +324,8 @@ contract Digits is Ownable, IERC20 {
         uint256 senderBalance = _balances[sender];
         require(senderBalance >= amount, "Digits: transfer exceeds balance");
 
-        uint256 contractTokenBalance = IERC20(this).balanceOf(
-            address(tokenStorage)
-        );
-        uint256 contractDaiBalance = IERC20(dai).balanceOf(
-            address(tokenStorage)
-        );
+        uint256 contractTokenBalance = balanceOf(address(tokenStorage));
+        uint256 contractDaiBalance = dai.balanceOf(address(tokenStorage));
 
         bool canSwap = contractTokenBalance >= swapTokensAtAmount;
 
@@ -383,10 +384,7 @@ contract Digits is Ownable, IERC20 {
         uint256 amount
     ) private {
         uint256 senderBalance = _balances[sender];
-        require(
-            senderBalance >= amount,
-            "Digits: transfer amount exceeds balance"
-        );
+        require(senderBalance >= amount, "Digits: tx amount > balance");
         _balances[sender] = senderBalance - amount;
         _balances[recipient] += amount;
         emit Transfer(sender, recipient, amount);
@@ -397,8 +395,8 @@ contract Digits is Ownable, IERC20 {
         address spender,
         uint256 amount
     ) private {
-        require(owner != address(0), "Digits: approve from the zero address");
-        require(spender != address(0), "Digits: approve to the zero address");
+        require(owner != address(0), "Digits: approve from 0 address");
+        require(spender != address(0), "Digits: approve to 0 address");
         _allowances[owner][spender] = amount;
         emit Approval(owner, spender, amount);
     }
@@ -440,9 +438,9 @@ contract Digits is Ownable, IERC20 {
             swapTokensDividends +
             swapTokensLiquidity;
 
-        uint256 initDaiBal = IERC20(dai).balanceOf(address(tokenStorage));
+        uint256 initDaiBal = dai.balanceOf(address(tokenStorage));
         tokenStorage.swapTokensForDai(swapTokensTotal);
-        uint256 daiSwapped = (IERC20(dai).balanceOf(address(tokenStorage)) -
+        uint256 daiSwapped = (dai.balanceOf(address(tokenStorage)) -
             initDaiBal) + dais;
 
         uint256 daiMarketing = (daiSwapped * swapTokensMarketing) /
@@ -467,14 +465,29 @@ contract Digits is Ownable, IERC20 {
         }
     }
 
-    function openTrading() external onlyOwner {
-        isOpen = true;
+    function _setAutomatedMarketMakerPair(address pair, bool value) private {
+        require(
+            automatedMarketMakerPairs[pair] != value,
+            "Digits: AMM pair is same value"
+        );
+        automatedMarketMakerPairs[pair] = value;
+        if (value) {
+            dividendTracker.excludeFromDividends(pair, true);
+        }
+        emit SetAutomatedMarketMakerPair(pair, value);
+    }
+
+    /* ============ External Owner Functions ============ */
+
+    function setMultiRewardsAddress(address _multiRewards) external onlyOwner {
+        require(_multiRewards != address(0), "Cannot set address zero");
+        multiRewards = _multiRewards;
     }
 
     function setTokenStorage(address _tokenStorage) external onlyOwner {
         require(
             address(tokenStorage) == address(0),
-            "Digits: tokenStorage already set."
+            "Digits: tokenStorage already set"
         );
 
         tokenStorage = ITokenStorage(_tokenStorage);
@@ -483,34 +496,6 @@ contract Digits is Ownable, IERC20 {
         excludeFromMaxTx(address(tokenStorage), true);
         excludeFromMaxWallet(address(tokenStorage), true);
         emit SetTokenStorage(_tokenStorage);
-    }
-
-    function excludeFromFees(address account, bool excluded) public onlyOwner {
-        require(
-            _isExcludedFromFees[account] != excluded,
-            "Digits: account is already set to requested state"
-        );
-        _isExcludedFromFees[account] = excluded;
-        emit ExcludeFromFees(account, excluded);
-    }
-
-    function isExcludedFromFees(address account) external view returns (bool) {
-        return _isExcludedFromFees[account];
-    }
-
-    function excludeFromDividends(address account, bool excluded)
-        external
-        onlyOwner
-    {
-        dividendTracker.excludeFromDividends(account, excluded);
-    }
-
-    function isExcludedFromDividends(address account)
-        external
-        view
-        returns (bool)
-    {
-        return dividendTracker.isExcludedFromDividends(account);
     }
 
     function setWallet(address _marketingWallet, address _liquidityWallet)
@@ -528,7 +513,7 @@ contract Digits is Ownable, IERC20 {
         external
         onlyOwner
     {
-        require(pair != uniswapV2Pair, "Digits: DEX pair can not be removed");
+        require(pair != uniswapV2Pair, "Digits: LP can not be removed");
         _setAutomatedMarketMakerPair(pair, value);
     }
 
@@ -539,7 +524,7 @@ contract Digits is Ownable, IERC20 {
     ) external onlyOwner {
         require(
             _treasuryFee <= 800 && _liquidityFee <= 800 && _dividendFee <= 800,
-            "Each fee must be below 8%."
+            "Each fee must be below 8%"
         );
 
         treasuryFeeBPS = _treasuryFee;
@@ -548,73 +533,6 @@ contract Digits is Ownable, IERC20 {
         totalFeeBPS = _treasuryFee + _liquidityFee + _dividendFee;
 
         emit SetFee(_treasuryFee, _liquidityFee, _dividendFee);
-    }
-
-    function _setAutomatedMarketMakerPair(address pair, bool value) private {
-        require(
-            automatedMarketMakerPairs[pair] != value,
-            "Digits: automated market maker pair is already set to that value"
-        );
-        automatedMarketMakerPairs[pair] = value;
-        if (value) {
-            dividendTracker.excludeFromDividends(pair, true);
-        }
-        emit SetAutomatedMarketMakerPair(pair, value);
-    }
-
-    function claim() external {
-        bool result = dividendTracker.processAccount(_msgSender());
-
-        require(result, "Digits: claim failed.");
-    }
-
-    function compound() external {
-        require(compoundingEnabled, "Digits: compounding is not enabled");
-        bool result = dividendTracker.compoundAccount(_msgSender());
-
-        require(result, "Digits: compounding failed.");
-    }
-
-    function withdrawableDividendOf(address account)
-        external
-        view
-        returns (uint256)
-    {
-        return dividendTracker.withdrawableDividendOf(account);
-    }
-
-    function withdrawnDividendOf(address account)
-        external
-        view
-        returns (uint256)
-    {
-        return dividendTracker.withdrawnDividendOf(account);
-    }
-
-    function accumulativeDividendOf(address account)
-        external
-        view
-        returns (uint256)
-    {
-        return dividendTracker.accumulativeDividendOf(account);
-    }
-
-    function getAccountInfo(address account)
-        external
-        view
-        returns (
-            address,
-            uint256,
-            uint256,
-            uint256,
-            uint256
-        )
-    {
-        return dividendTracker.getAccountInfo(account);
-    }
-
-    function getLastClaimTime(address account) external view returns (uint256) {
-        return dividendTracker.getLastClaimTime(account);
     }
 
     function setSwapEnabled(bool _enabled) external onlyOwner {
@@ -633,6 +551,24 @@ contract Digits is Ownable, IERC20 {
         emit CompoundingEnabled(_enabled);
     }
 
+    function setMaxTxBPS(uint256 bps) external onlyOwner {
+        require(bps >= 49 && bps <= 10000, "BPS only between 49 and 10000");
+        maxTxBPS = bps;
+        _maxTxAmount = (totalSupply() * maxTxBPS) / 10000;
+        emit SetMaxTxBPS(bps);
+    }
+
+    function setMaxWalletBPS(uint256 bps) external onlyOwner {
+        require(bps >= 100 && bps <= 10000, "BPS only between 100 and 10000");
+        maxWalletBPS = bps;
+        _maxWallet = (totalSupply() * maxWalletBPS) / 10000;
+        emit SetMaxWalletBPS(bps);
+    }
+
+    function openTrading() external onlyOwner {
+        isOpen = true;
+    }
+
     function updateDividendSettings(
         bool _swapEnabled,
         uint256 _swapTokensAtAmount,
@@ -649,31 +585,26 @@ contract Digits is Ownable, IERC20 {
         );
     }
 
-    function setMaxTxBPS(uint256 bps) external onlyOwner {
-        require(bps >= 49 && bps <= 10000, "BPS must be between 49 and 10000");
-        maxTxBPS = bps;
-        _maxTxAmount = (totalSupply() * maxTxBPS) / 10000;
-        emit SetMaxTxBPS(bps);
+    function excludeFromFees(address account, bool excluded) public onlyOwner {
+        require(
+            _isExcludedFromFees[account] != excluded,
+            "Digits: same state value"
+        );
+        _isExcludedFromFees[account] = excluded;
+        emit ExcludeFromFees(account, excluded);
+    }
+
+    function excludeFromDividends(address account, bool excluded)
+        external
+        onlyOwner
+    {
+        dividendTracker.excludeFromDividends(account, excluded);
     }
 
     function excludeFromMaxTx(address account, bool excluded) public onlyOwner {
         _isExcludedFromMaxTx[account] = excluded;
 
         emit ExcludeFromMaxTx(account, excluded);
-    }
-
-    function isExcludedFromMaxTx(address account) external view returns (bool) {
-        return _isExcludedFromMaxTx[account];
-    }
-
-    function setMaxWalletBPS(uint256 bps) external onlyOwner {
-        require(
-            bps >= 100 && bps <= 10000,
-            "BPS must be between 100 and 10000"
-        );
-        maxWalletBPS = bps;
-        _maxWallet = (totalSupply() * maxWalletBPS) / 10000;
-        emit SetMaxWalletBPS(bps);
     }
 
     function excludeFromMaxWallet(address account, bool excluded)
@@ -683,14 +614,6 @@ contract Digits is Ownable, IERC20 {
         _isExcludedFromMaxWallet[account] = excluded;
 
         emit ExcludeFromMaxWallet(account, excluded);
-    }
-
-    function isExcludedFromMaxWallet(address account)
-        external
-        view
-        returns (bool)
-    {
-        return _isExcludedFromMaxWallet[account];
     }
 
     function rescueToken(address _token, uint256 _amount) external onlyOwner {

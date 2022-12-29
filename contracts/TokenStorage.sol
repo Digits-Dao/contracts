@@ -7,21 +7,22 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 
-interface IDividendTracker {
-    function distributeDividends(uint256 daiDividends) external;
-}
+import "./interfaces/IDividendTracker.sol";
+import "./interfaces/ITokenStorage.sol";
 
-contract TokenStorage is Ownable {
+contract TokenStorage is Ownable, ITokenStorage {
     using SafeERC20 for IERC20;
-    address public immutable dai;
-    address public liquidityWallet;
-    address public immutable tokenAddress;
+
+    /* ============ State ============ */
+
     IDividendTracker public immutable dividendTracker;
     IUniswapV2Router02 public uniswapV2Router;
 
-    mapping(address => bool) public managers;
+    address public immutable dai;
+    address public immutable tokenAddress;
+    address public liquidityWallet;
 
-    event SendDividends(uint256 tokensSwapped, uint256 amount);
+    mapping(address => bool) public managers;
 
     constructor(
         address _dai,
@@ -49,6 +50,8 @@ contract TokenStorage is Ownable {
         uniswapV2Router = IUniswapV2Router02(_uniswapRouter);
     }
 
+    /* ============ External Owner Functions ============ */
+
     function addManager(address _address) external onlyOwner {
         require(tokenAddress == _address, "Digits: must be digits address.");
         managers[_address] = true;
@@ -57,6 +60,8 @@ contract TokenStorage is Ownable {
     function removeManager(address _address) external onlyOwner {
         managers[_address] = false;
     }
+
+    /* ============ External Functions ============ */
 
     function transferDai(address to, uint256 amount) external {
         require(
