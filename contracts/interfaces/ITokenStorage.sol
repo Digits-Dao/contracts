@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.10;
+pragma solidity 0.8.10;
 
 interface ITokenStorage {
     event SendDividends(uint256 tokensSwapped, uint256 amount);

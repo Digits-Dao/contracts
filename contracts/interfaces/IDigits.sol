@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.10;
+pragma solidity 0.8.10;
 
 interface IDigits {
     event SwapAndAddLiquidity(
@@ -31,10 +31,10 @@ interface IDigits {
 
     function claim() external;
 
-    // function withdrawableDividendOf(address account)
-    //     external
-    //     view
-    //     returns (uint256);
+    function withdrawableDividendOf(address account)
+        external
+        view
+        returns (uint256);
 
     function triggerDividendDistribution() external;
 }
