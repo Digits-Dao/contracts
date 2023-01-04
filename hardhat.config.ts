@@ -1,7 +1,8 @@
 import { task } from "hardhat/config";
 import "@nomiclabs/hardhat-waffle";
-import '@typechain/hardhat';
+import "@nomiclabs/hardhat-etherscan";
 import '@nomiclabs/hardhat-ethers';
+import '@typechain/hardhat';
 import "hardhat-etherscan-abi";
 import * as dotenv from 'dotenv'
 dotenv.config()
@@ -31,9 +32,26 @@ module.exports = {
         blockNumber: 15476666
       }
     },
+    goerli: {
+      url: `https://eth-goerli.g.alchemy.com/v2/${process.env.GOERLI_ALCHEMY_KEY}`,
+      accounts: [process.env.PRIVATE_KEY]
+    }
   },
   etherscan: {
-    apiKey: process.env.MAINNET_ETHERSCAN_KEY
+    apiKey: {
+      // mainnet: process.env.MAINNET_ETHERSCAN_KEY,
+      goerli: process.env.MAINNET_ETHERSCAN_KEY
+    },
+    customChains: [
+      {
+        network: "goerli",
+        chainId: 5,
+        urls: {
+          apiURL: "https://api-goerli.etherscan.io/api",
+          browserURL: "https://goerli.etherscan.io"
+        }
+      }
+    ]
   },
   solidity: {
     compilers: [
