@@ -6,24 +6,32 @@ import { getBigNumber } from "../utils";
 const addresses = {
   goerli: {
     dai: "0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60",
-    suhi_router: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"
+    uni_router: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+    disperse: "0xD152f549545093347A162Dce210e7293f1452150"
+  },
+  mainnet: {
+    dai: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+    uni_router: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+    disperse: "0xD152f549545093347A162Dce210e7293f1452150"
   }
 }
 
 async function main() {
   const accounts = await ethers.getSigners();
 
+  console.log(`Deploying Digits...`);
+
   // Deploy Digits
   const digitsFactory = await ethers.getContractFactory("Digits");
   const digits = (await digitsFactory.deploy(
     addresses[hre.network.name]["dai"],
-    addresses[hre.network.name]["suhi_router"],
-    accounts[0].address, [accounts[0].address])) as Digits;
+    addresses[hre.network.name]["uni_router"],
+    accounts[0].address, [accounts[0].address, addresses[hre.network.name]["disperse"]])) as Digits;
 
   await digits.deployed();
 
   // Update settings
-  await digits.updateDividendSettings(true, getBigNumber(100_000), true);
+  await digits.updateDividendSettings(false, getBigNumber(100_000), true);
 
   console.log(`Digits deployed to ${digits.address}`);
 
@@ -39,7 +47,7 @@ async function main() {
     digits.address,
     accounts[0].address,
     dividendTrackerAddress,
-    addresses[hre.network.name]["suhi_router"])) as TokenStorage;
+    addresses[hre.network.name]["uni_router"])) as TokenStorage;
 
   await tokenStorage.deployed();
 

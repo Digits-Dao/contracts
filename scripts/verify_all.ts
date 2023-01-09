@@ -4,15 +4,21 @@ import { ethers } from "hardhat";
 const addresses = {
   goerli: {
     dai: "0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60",
-    suhi_router: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"
-  }
+    uni_router: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+    disperse: "0xD152f549545093347A162Dce210e7293f1452150"
+  },
+  mainnet: {
+    dai: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+    uni_router: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+    disperse: "0xD152f549545093347A162Dce210e7293f1452150"
+  },
 }
 
 // Enter manually
-const digitsAddress = "0x9BDfD637f171C85A16f4066B2730EF026ca25046";
-const dividendTrackerAddress = "0xD980b1c800cB849e20EF1A638A3d8e82657D90de";
-const TokenStorageAddress = "0xE0F10a6Dc17efba30D64792736Db79c7De12Ac3B";
-const multiRewardsAddress = "0xCE22c3e95B5E118ea61C4fb9357Fe45Cbb34cb56";
+const digitsAddress = "";
+const dividendTrackerAddress = "";
+const TokenStorageAddress = "";
+const multiRewardsAddress = "";
 
 async function main() {
   const accounts = await ethers.getSigners();
@@ -21,9 +27,9 @@ async function main() {
     address: digitsAddress,
     constructorArguments: [
       addresses[hre.network.name]["dai"],
-      addresses[hre.network.name]["suhi_router"],
+      addresses[hre.network.name]["uni_router"],
       accounts[0].address,
-      [accounts[0].address]
+      [accounts[0].address, addresses[hre.network.name]["disperse"]]
     ],
   });
 
@@ -34,7 +40,7 @@ async function main() {
     constructorArguments: [
       addresses[hre.network.name]["dai"],
       digitsAddress,
-      addresses[hre.network.name]["suhi_router"]
+      addresses[hre.network.name]["uni_router"]
     ],
   });
 
@@ -47,7 +53,7 @@ async function main() {
       digitsAddress,
       accounts[0].address,
       dividendTrackerAddress,
-      addresses[hre.network.name]["suhi_router"]
+      addresses[hre.network.name]["uni_router"]
     ],
   });
 

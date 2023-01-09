@@ -7,7 +7,7 @@ import { constants } from "ethers";
 
 describe("MultiRewards", function () {
     let MultiRewards: MultiRewards;
-    let SushiRouter: IUniswapV2Router02;
+    let UniswapRouter: IUniswapV2Router02;
     let TokenStorage: TokenStorage;
     let deployer: SignerWithAddress;
     let alice: SignerWithAddress;
@@ -20,7 +20,7 @@ describe("MultiRewards", function () {
     const initialDeployerAmount = getBigNumber(10_000_000);
     const rewardsDuration = 86400 * 7;
     const DAI = "0x6B175474E89094C44Da98b954EedeAC495271d0F"
-    const SUSHI_ROUTER = "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"
+    const UNI_ROUTER = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
     const DAI_WHALE = "0xF977814e90dA44bFA03b6295A0616a897441aceC"
     const PRECISION = getBigNumber(1, 5);
     const EXPECTED_WITHDRAWABLE_AMOUNT = getBigNumber("32621448591520465892", 0);
@@ -31,7 +31,7 @@ describe("MultiRewards", function () {
         Dai = await ethers.getContractAt(
             "@openzeppelin/contracts/token/ERC20/IERC20.sol:IERC20", DAI) as IERC20;
 
-        SushiRouter = await ethers.getContractAt("IUniswapV2Router02", SUSHI_ROUTER) as IUniswapV2Router02;
+        UniswapRouter = await ethers.getContractAt("IUniswapV2Router02", UNI_ROUTER) as IUniswapV2Router02;
 
         // send dai to deployer
         const daiWhale = await ethers.getImpersonatedSigner(DAI_WHALE);
@@ -40,12 +40,12 @@ describe("MultiRewards", function () {
 
         // deploy Digits
         const digitsFactory = await ethers.getContractFactory("Digits");
-        Digits = (await digitsFactory.deploy(Dai.address, SushiRouter.address, deployer.address, [deployer.address])) as Digits;
+        Digits = (await digitsFactory.deploy(Dai.address, UniswapRouter.address, deployer.address, [deployer.address])) as Digits;
 
         // deploy TokenStorage
         const tokenStorageFactory = await ethers.getContractFactory("TokenStorage");
         const dividendTracker = await Digits.dividendTracker();
-        TokenStorage = (await tokenStorageFactory.deploy(Dai.address, Digits.address, deployer.address, dividendTracker, SushiRouter.address)) as TokenStorage;
+        TokenStorage = (await tokenStorageFactory.deploy(Dai.address, Digits.address, deployer.address, dividendTracker, UniswapRouter.address)) as TokenStorage;
         await TokenStorage.addManager(Digits.address);
         await Digits.setTokenStorage(TokenStorage.address);
 
@@ -63,16 +63,16 @@ describe("MultiRewards", function () {
         await Digits.transfer(bob.address, initialUserAmount);
         await Digits.connect(alice).approve(MultiRewards.address, constants.MaxUint256);
         await Digits.connect(bob).approve(MultiRewards.address, constants.MaxUint256);
-        await Digits.connect(bob).approve(SushiRouter.address, constants.MaxUint256);
+        await Digits.connect(bob).approve(UniswapRouter.address, constants.MaxUint256);
         await Dai.approve(MultiRewards.address, constants.MaxUint256);
         await Digits.updateDividendSettings(true, getBigNumber(1_000), true);
 
         // add liquidity for DIGITS-DAI pair
         const currentBlock = await ethers.provider.getBlockNumber();
         const blockTime = (await ethers.provider.getBlock(currentBlock)).timestamp;
-        await Digits.approve(SushiRouter.address, constants.MaxUint256);
-        await Dai.approve(SushiRouter.address, constants.MaxUint256);
-        await SushiRouter.addLiquidity(
+        await Digits.approve(UniswapRouter.address, constants.MaxUint256);
+        await Dai.approve(UniswapRouter.address, constants.MaxUint256);
+        await UniswapRouter.addLiquidity(
             Digits.address,
             Dai.address,
             getBigNumber(10_000_000),
@@ -90,7 +90,7 @@ describe("MultiRewards", function () {
         for (let index = 0; index < tradesCount; index++) {
             const currentBlock = await ethers.provider.getBlockNumber();
             const blockTime = (await ethers.provider.getBlock(currentBlock)).timestamp;
-            await SushiRouter.connect(bob).swapExactTokensForTokensSupportingFeeOnTransferTokens(
+            await UniswapRouter.connect(bob).swapExactTokensForTokensSupportingFeeOnTransferTokens(
                 getBigNumber(tradeValue),
                 0,
                 [Digits.address, Dai.address],

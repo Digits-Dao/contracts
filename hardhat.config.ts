@@ -35,6 +35,12 @@ module.exports = {
     goerli: {
       url: `https://eth-goerli.g.alchemy.com/v2/${process.env.GOERLI_ALCHEMY_KEY}`,
       accounts: [process.env.PRIVATE_KEY]
+    },
+    avalanche: {
+      chainId: 43114,
+      gasPrice: 25000000000,
+      url: "https://api.avax.network/ext/bc/C/rpc",
+      accounts: [process.env.PRIVATE_KEY]
     }
   },
   etherscan: {
