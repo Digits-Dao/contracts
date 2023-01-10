@@ -6,7 +6,7 @@ var fs = require('fs');
 // Avalanche C-Chain snapshot
 const digitsAddress = "0x18e2269f98db2eda3cfc06e6cca384b291e553d9";
 const fromBlock = 10668334;     // Digits creation block
-const toBlock = 24559303;       // Snapshot block
+const toBlock = 24750350;       // Snapshot block
 const INCREMENT = 2000;         // Max events per node call
 
 type HolderInfo = {
@@ -55,7 +55,7 @@ async function main() {
 
     try {
         for (var i = fromBlock; i < toBlock; i = i + INCREMENT + 1) {
-            console.log(i, "/", toBlock, balances.keys.length);
+            console.log(i, "/", toBlock);
             var end = i + INCREMENT;
             if (end >= toBlock) end = toBlock;
             const events = await digits.queryFilter(filter, i, end);
@@ -66,6 +66,7 @@ async function main() {
         console.log(e.message);
         throw e;
     } finally {
+        console.log(toBlock, "/", toBlock);
         console.log("Saving JSON...");
 
         for (let key in balances) {
@@ -84,7 +85,7 @@ async function main() {
         })
 
         const json = JSON.stringify(holderInfoFormatted);
-        await fs.writeFile('data/snapshot.json', json, 'utf8', () => {
+        await fs.writeFile('data/snapshot_raw.json', json, 'utf8', () => {
             console.log("JSON saved");
         });
     }

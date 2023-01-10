@@ -1,7 +1,6 @@
 import * as hre from "hardhat";
 import { ethers } from "hardhat";
 import { Digits, TokenStorage, MultiRewards } from "../typechain-types";
-import { getBigNumber } from "../utils";
 
 const addresses = {
   goerli: {
@@ -16,6 +15,9 @@ const addresses = {
   }
 }
 
+const DIGITS_TREASURY = "0x0c1a3E4E1C3DA4c89582dfA1AFA87A1853D7f78f";
+const DIGITS_TEAM = "0x476cfb80ff7BAeDbAcaC55661efbfB20c5558D93";
+
 async function main() {
   const accounts = await ethers.getSigners();
 
@@ -26,12 +28,19 @@ async function main() {
   const digits = (await digitsFactory.deploy(
     addresses[hre.network.name]["dai"],
     addresses[hre.network.name]["uni_router"],
-    accounts[0].address, [accounts[0].address, addresses[hre.network.name]["disperse"]])) as Digits;
+    DIGITS_TREASURY, [accounts[0].address, addresses[hre.network.name]["disperse"], DIGITS_TREASURY])) as Digits;
 
   await digits.deployed();
 
   // Update settings
-  await digits.updateDividendSettings(false, getBigNumber(100_000), true);
+  await digits.setSwapEnabled(false); // temporary before airdrop
+  await digits.excludeFromFees(DIGITS_TREASURY, true);
+  await digits.excludeFromFees(DIGITS_TEAM, true);
+  await digits.excludeFromMaxTx(DIGITS_TREASURY, true);
+  await digits.excludeFromMaxTx(DIGITS_TEAM, true);
+  await digits.excludeFromMaxWallet(DIGITS_TREASURY, true);
+  await digits.excludeFromMaxWallet(DIGITS_TEAM, true);
+  await digits.excludeFromDividends(DIGITS_TREASURY, true);
 
   console.log(`Digits deployed to ${digits.address}`);
 
@@ -45,7 +54,7 @@ async function main() {
   const tokenStorage = (await tokenStorageFactory.deploy(
     addresses[hre.network.name]["dai"],
     digits.address,
-    accounts[0].address,
+    DIGITS_TREASURY,
     dividendTrackerAddress,
     addresses[hre.network.name]["uni_router"])) as TokenStorage;
 

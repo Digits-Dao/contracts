@@ -4,6 +4,7 @@ import "@nomiclabs/hardhat-etherscan";
 import '@nomiclabs/hardhat-ethers';
 import '@typechain/hardhat';
 import "hardhat-etherscan-abi";
+import "@xyrusworx/hardhat-solidity-json";
 import * as dotenv from 'dotenv'
 dotenv.config()
 
@@ -66,15 +67,25 @@ module.exports = {
   },
   solidity: {
     compilers: [
-      { version: "0.5.17" },
-      { version: "0.8.10" },
+      {
+        version: "0.5.17",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200
+          }
+        },
+      },
+      {
+        version: "0.8.10",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200
+          }
+        },
+      },
     ]
-  },
-  settings: {
-    optimizer: {
-      enabled: true,
-      runs: 500
-    }
   },
   paths: {
     sources: "./contracts",

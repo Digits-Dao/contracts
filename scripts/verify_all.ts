@@ -14,6 +14,8 @@ const addresses = {
   },
 }
 
+const DIGITS_TREASURY = "0x0c1a3E4E1C3DA4c89582dfA1AFA87A1853D7f78f";
+
 // Enter manually
 const digitsAddress = "";
 const dividendTrackerAddress = "";
@@ -28,8 +30,8 @@ async function main() {
     constructorArguments: [
       addresses[hre.network.name]["dai"],
       addresses[hre.network.name]["uni_router"],
-      accounts[0].address,
-      [accounts[0].address, addresses[hre.network.name]["disperse"]]
+      DIGITS_TREASURY,
+      [accounts[0].address, addresses[hre.network.name]["disperse"], DIGITS_TREASURY],
     ],
   });
 
@@ -51,7 +53,7 @@ async function main() {
     constructorArguments: [
       addresses[hre.network.name]["dai"],
       digitsAddress,
-      accounts[0].address,
+      DIGITS_TREASURY,
       dividendTrackerAddress,
       addresses[hre.network.name]["uni_router"]
     ],

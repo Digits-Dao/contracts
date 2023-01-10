@@ -4,41 +4,61 @@ import { BigNumber } from "ethers";
 import { Digits } from "../typechain-types";
 import disperseAbi from '../data/disperse.abi.json';
 import snapshotData from '../data/snapshot.json';
-import { getBigNumber } from "../utils";
+import snapshotContractsData from '../data/snapshot_contracts.json';
+import snapshotRawData from '../data/snapshot_raw.json';
 
 // Enter manually
 const addresses = {
     goerli: {
         disperse: "0xD152f549545093347A162Dce210e7293f1452150",
-        digits: "0xBf6750Ea6CA706A4C89940FF1AbAC51AfceB4031"
+        digits: ""    // Enter manually
     },
     mainnet: {
         disperse: "0xD152f549545093347A162Dce210e7293f1452150",
-        digits: ""  // Enter manually
+        digits: ""    // Enter manually
     }
 }
+
 const holders: string[] = new Array<string>();
 const amounts: BigNumber[] = new Array<BigNumber>();
-const sum = BigNumber.from(0);
-const INCREMENT = 300;
+const INCREMENT = 210;
 const GAS_PRICE = 16_000_000_000;  // 16 gwei
-const GAS_LIMIT = 30_000_000;
+const GAS_LIMIT = 16_000_000;
+const STUCK = false;    // Set true when stuck
 
 async function main() {
     console.log("Load snapshot data...");
 
-    snapshotData.forEach(element => {
+    // Sanity check
+    var rawSum = BigNumber.from(0);
+    snapshotRawData.forEach(element => {
         var bign = BigNumber.from(element.amount)
-        sum.add(bign);
         if (bign.gt(BigNumber.from(0))) {
-            holders.push(element.account);
-            amounts.push(bign);
+            rawSum = rawSum.add(bign);
         }
     });
 
-    // Sanity check
-    console.log("Sum should be 0:", sum);
-    if (!sum.eq(BigNumber.from(0))) throw new Error("Snapshot malcostructed");
+    console.log("snapshot_raw.json sum: ", rawSum.toString());
+
+    var sum = BigNumber.from(0);
+    snapshotData.forEach(element => {
+        var bign = BigNumber.from(element.amount)
+        if (bign.gt(BigNumber.from(0))) {
+            holders.push(element.account);
+            amounts.push(bign);
+            sum = sum.add(bign);
+        }
+    });
+
+    snapshotContractsData.forEach(element => {
+        var bign = BigNumber.from(element.amount)
+        sum = sum.add(bign);
+    });
+
+    console.log("snapshot.json and snapshot_contracts sum: ", sum.toString());
+
+    if (!sum.eq(rawSum)) throw new Error("Snapshot raw sum doesn't equal snapshot.json and snapshot_contracts.json sumś");
+    else console.log("snapshot_raw.json divided correctly");
 
     console.log("Snapshot data loaded");
     console.log(`${holders.length} eligible addresses`);
@@ -56,18 +76,20 @@ async function main() {
 
     console.log("Approve DIGITS for Disperse.app");
 
-    await digits.approve(disperse.address, await digits.totalSupply());
-    await digits.excludeFromFees(disperse.address, true);
-    await digits.excludeFromMaxTx(disperse.address, true);
-    await digits.excludeFromMaxWallet(disperse.address, true);
-    await digits.excludeFromDividends(disperse.address, true);
+    if (!STUCK) {
+        await digits.approve(disperse.address, await digits.totalSupply());
+        await digits.excludeFromFees(disperse.address, true);
+        await digits.excludeFromMaxTx(disperse.address, true);
+        await digits.excludeFromMaxWallet(disperse.address, true);
+        await digits.excludeFromDividends(disperse.address, true);
+    }
 
     console.log("Distribute tokens...");
 
     console.log(holders[0], holders[holders.length - 1]);
 
     var newNonce = 189;
-    for (var i = 0; i < 1; i += INCREMENT) {
+    for (var i = 0; i < holders.length; i += INCREMENT) {
         var batch = i + INCREMENT;
         if (batch > holders.length) {
             batch = holders.length;
@@ -80,15 +102,16 @@ async function main() {
             // gasPrice: GAS_PRICE, // Uncomment when stuck
             gasLimit: GAS_LIMIT
         });
-
         newNonce += 1;
 
         console.log("Tx hash:", tx.hash);
+        await tx.wait();
+        console.log("Batch done")
     }
 
-    console.log(`Distributing done`);
+    console.log(`Distributing done, updating DIGITS`);
 
-    await digits.updateDividendSettings(false, getBigNumber(100_000), true);
+    await digits.setSwapEnabled(true);
 
     console.log(`All done`);
 }
