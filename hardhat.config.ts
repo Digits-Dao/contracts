@@ -38,15 +38,20 @@ module.exports = {
     },
     avalanche: {
       chainId: 43114,
-      gasPrice: 25000000000,
+      gasPrice: 25_000_000_000,
       url: "https://api.avax.network/ext/bc/C/rpc",
+      accounts: [process.env.PRIVATE_KEY]
+    },
+    mainnet: {
+      url: `https://eth-mainnet.g.alchemy.com/v2/${process.env.MAINNET_ALCHEMY_KEY}`,
+      gasPrice: 15_000_000_000,
       accounts: [process.env.PRIVATE_KEY]
     }
   },
   etherscan: {
     apiKey: {
-      // mainnet: process.env.MAINNET_ETHERSCAN_KEY,
-      goerli: process.env.MAINNET_ETHERSCAN_KEY
+      mainnet: process.env.MAINNET_ETHERSCAN_KEY,
+      goerli: process.env.MAINNET_ETHERSCAN_KEY,
     },
     customChains: [
       {
@@ -61,10 +66,7 @@ module.exports = {
   },
   solidity: {
     compilers: [
-      { version: "0.6.2" },
       { version: "0.5.17" },
-      { version: "0.7.5" },
-      { version: "0.8.0" },
       { version: "0.8.10" },
     ]
   },
